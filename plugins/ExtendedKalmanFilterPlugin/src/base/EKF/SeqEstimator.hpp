@@ -235,6 +235,27 @@ protected:
    /// Indexing for the .mat filter elements
    std::map<std::string, Integer> matFilterIndex;
 
+   /// JSON entry for a single filter time-update or measurement-update
+   struct FilterJsonEntry
+   {
+      std::string epochUtc;   ///< UTC Gregorian epoch string
+      std::string type;       ///< "Initial", "Time", "Measurement", or "Predict"
+      RealArray   state;
+      std::vector<std::vector<Real>> cov;
+      std::vector<std::vector<Real>> covVNB;
+      std::vector<std::vector<Real>> processNoise;
+      std::vector<std::vector<Real>> stm;
+      Integer     measNum;    ///< Observation record number (-1 if not a measurement update)
+      RealArray   residual;
+      RealArray   scaledResid;
+      std::string editFlag;
+
+      FilterJsonEntry() : measNum(-1) {}
+   };
+
+   /// Accumulated filter JSON entries, written at RunComplete
+   std::vector<FilterJsonEntry> jsonFilterData;
+
    /// previous update epoch
    GmatTime                 prevUpdateEpochGT;
 
@@ -342,6 +363,9 @@ protected:
    virtual void           AddMatlabFilterData(const UpdateInfoType &updateStat,
                                               DataBucket &matFilterData, IntegerMap &matFilterIndex);
    virtual void           AddMatlabConfigData();
+
+   virtual void           AddJsonFilterData(const UpdateInfoType &updateStat);
+   virtual void           WriteJsonContent(std::ofstream &outFile) override;
 
    virtual bool			  VerifySmoothTimeStep();
    virtual Real			  MatchSmoothTimeStep();

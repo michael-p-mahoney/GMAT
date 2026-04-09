@@ -1374,6 +1374,7 @@ void SeqEstimator::CompleteInitialization()
 
       WriteDataFile();
       AddMatlabFilterData(updateStat);
+      AddJsonFilterData(updateStat);
       updateStats.push_back(updateStat);
 }
 
@@ -1860,6 +1861,9 @@ void SeqEstimator::RunComplete()
       matWriter->CloseFile();
    }
 
+   if (writeJsonFile)
+      WriteJsonData();
+
    if (dataFile.is_open())
       dataFile.close();
 
@@ -1921,11 +1925,13 @@ void SeqEstimator::FilterUpdate()
       {
          WriteDataFile();
          AddMatlabFilterData(updateStat);
+         AddJsonFilterData(updateStat);
          updateStats.push_back(updateStat);
       }
       else if (addPredictToMatlab)
       {
          AddMatlabFilterData(updateStat);
+         AddJsonFilterData(updateStat);
       }
 
       // Reset the STM
@@ -3462,10 +3468,239 @@ void SeqEstimator::AddMatlabConfigData()
 
 
 //------------------------------------------------------------------------------
+//  void AddJsonFilterData(const UpdateInfoType &updateStat)
+//------------------------------------------------------------------------------
+/**
+ * This method accumulates a JSON entry for a filter time-update or
+ * measurement-update, to be written at RunComplete.
+ */
+//------------------------------------------------------------------------------
+static std::vector<std::vector<Real>> RmatrixToVec(const Rmatrix &m)
+{
+   std::vector<std::vector<Real>> result;
+   if (!m.IsSized())
+      return result;
+   Integer nr = m.GetNumRows(), nc = m.GetNumColumns();
+   result.resize(nr);
+   for (Integer r = 0; r < nr; ++r)
+   {
+      result[r].resize(nc);
+      for (Integer c = 0; c < nc; ++c)
+         result[r][c] = m(r, c);
+   }
+   return result;
+}
+
+void SeqEstimator::AddJsonFilterData(const UpdateInfoType &updateStat)
+{
+   if (!writeJsonFile)
+      return;
+
+   FilterJsonEntry entry;
+
+   // Convert epoch to UTC Gregorian string
+   bool handleLeapSecond;
+   GmatTime utcMjdEpoch = theTimeConverter->Convert(updateStat.epoch,
+         TimeSystemConverter::A1MJD, TimeSystemConverter::UTCMJD,
+         GmatTimeConstants::JD_JAN_5_1941, &handleLeapSecond);
+   entry.epochUtc = theTimeConverter->ConvertMjdToGregorian(utcMjdEpoch.GetMjd(), handleLeapSecond);
+
+   // Determine update type
+   if (jsonFilterData.empty())
+      entry.type = "Initial";
+   else if (updateStat.isObs)
+      entry.type = "Measurement";
+   else if (isPredicting && !hasAnchorEpoch)
+      entry.type = "Predict";
+   else
+      entry.type = "Time";
+
+   entry.state        = updateStat.state;
+   entry.cov          = RmatrixToVec(updateStat.cov);
+   entry.covVNB       = RmatrixToVec(updateStat.covVNB);
+   entry.processNoise = RmatrixToVec(updateStat.processNoise);
+   entry.stm          = RmatrixToVec(updateStat.stm);
+
+   if (updateStat.isObs)
+   {
+      entry.measNum     = updateStat.measStat.recNum;
+      entry.residual    = updateStat.measStat.residual;
+      entry.scaledResid = updateStat.measStat.scaledResid;
+      entry.editFlag    = updateStat.measStat.removedReason;
+   }
+
+   jsonFilterData.push_back(entry);
+}
+
+
+//------------------------------------------------------------------------------
+//  void WriteJsonContent(std::ofstream &outFile)
+//------------------------------------------------------------------------------
+/**
+ * Overrides Estimator::WriteJsonContent to write the "FilterUpdates" section
+ * of the JSON file.
+ */
+//------------------------------------------------------------------------------
+void SeqEstimator::WriteJsonContent(std::ofstream &outFile)
+{
+   std::stringstream fmt;
+   fmt.precision(15);
+
+   outFile << "\n    \"FilterUpdates\" : [\n";
+
+   for (Integer i = 0; i < (Integer)jsonFilterData.size(); ++i)
+   {
+      const FilterJsonEntry &entry = jsonFilterData[i];
+
+      if (i != 0)
+         outFile << ",\n";
+      outFile << "        {\n";
+      outFile << "            \"Epoch\" : \"" << entry.epochUtc << "\",\n";
+      outFile << "            \"Type\" : \"" << entry.type << "\",\n";
+
+      // State
+      outFile << "            \"State\" : [";
+      for (Integer j = 0; j < (Integer)entry.state.size(); ++j)
+      {
+         if (j != 0) outFile << ", ";
+         fmt << entry.state[j];
+         outFile << fmt.str();
+         fmt.str("");
+      }
+      outFile << "],\n";
+
+      // Covariance
+      outFile << "            \"Covariance\" : [";
+      for (Integer r = 0; r < (Integer)entry.cov.size(); ++r)
+      {
+         if (r != 0) outFile << ", ";
+         outFile << "[";
+         for (Integer c = 0; c < (Integer)entry.cov[r].size(); ++c)
+         {
+            if (c != 0) outFile << ", ";
+            fmt << entry.cov[r][c];
+            outFile << fmt.str();
+            fmt.str("");
+         }
+         outFile << "]";
+      }
+      outFile << "]";
+
+      if (dataFileStyle == "Verbose")
+      {
+         // CovarianceVNB
+         if (!entry.covVNB.empty())
+         {
+            outFile << ",\n            \"CovarianceVNB\" : [";
+            for (Integer r = 0; r < (Integer)entry.covVNB.size(); ++r)
+            {
+               if (r != 0) outFile << ", ";
+               outFile << "[";
+               for (Integer c = 0; c < (Integer)entry.covVNB[r].size(); ++c)
+               {
+                  if (c != 0) outFile << ", ";
+                  fmt << entry.covVNB[r][c];
+                  outFile << fmt.str();
+                  fmt.str("");
+               }
+               outFile << "]";
+            }
+            outFile << "]";
+         }
+
+         // ProcessNoise
+         if (!entry.processNoise.empty())
+         {
+            outFile << ",\n            \"ProcessNoise\" : [";
+            for (Integer r = 0; r < (Integer)entry.processNoise.size(); ++r)
+            {
+               if (r != 0) outFile << ", ";
+               outFile << "[";
+               for (Integer c = 0; c < (Integer)entry.processNoise[r].size(); ++c)
+               {
+                  if (c != 0) outFile << ", ";
+                  fmt << entry.processNoise[r][c];
+                  outFile << fmt.str();
+                  fmt.str("");
+               }
+               outFile << "]";
+            }
+            outFile << "]";
+         }
+
+         // STM
+         if (!entry.stm.empty())
+         {
+            outFile << ",\n            \"STM\" : [";
+            for (Integer r = 0; r < (Integer)entry.stm.size(); ++r)
+            {
+               if (r != 0) outFile << ", ";
+               outFile << "[";
+               for (Integer c = 0; c < (Integer)entry.stm[r].size(); ++c)
+               {
+                  if (c != 0) outFile << ", ";
+                  fmt << entry.stm[r][c];
+                  outFile << fmt.str();
+                  fmt.str("");
+               }
+               outFile << "]";
+            }
+            outFile << "]";
+         }
+      }
+
+      // Measurement update fields
+      if (entry.measNum >= 0)
+      {
+         fmt << ",\n            \"MeasurementNumber\" : " << entry.measNum;
+         outFile << fmt.str();
+         fmt.str("");
+
+         // Residual
+         outFile << ",\n            \"Residual\" : [";
+         for (Integer j = 0; j < (Integer)entry.residual.size(); ++j)
+         {
+            if (j != 0) outFile << ", ";
+            fmt << entry.residual[j];
+            outFile << fmt.str();
+            fmt.str("");
+         }
+         outFile << "]";
+
+         if (dataFileStyle == "Verbose")
+         {
+            // ScaledResidual
+            outFile << ",\n            \"ScaledResidual\" : [";
+            for (Integer j = 0; j < (Integer)entry.scaledResid.size(); ++j)
+            {
+               if (j != 0) outFile << ", ";
+               fmt << entry.scaledResid[j];
+               outFile << fmt.str();
+               fmt.str("");
+            }
+            outFile << "]";
+         }
+
+         // EditFlag
+         outFile << ",\n            \"EditFlag\" : ";
+         if (entry.editFlag.empty() || entry.editFlag == "N")
+            outFile << "null";
+         else
+            outFile << "\"" << entry.editFlag << "\"";
+      }
+
+      outFile << "\n        }";
+   }
+
+   outFile << "\n    ]\n\n";
+}
+
+
+//------------------------------------------------------------------------------
 //  bool VerifySmoothTimeStep()
 //------------------------------------------------------------------------------
 /**
- * This method checks the forward filter for epoch that the back filter 
+ * This method checks the forward filter for epoch that the back filter
  * is attempting to use.
  *
  * Returns true if found false if not

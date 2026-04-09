@@ -303,6 +303,7 @@ void ExtendedKalmanFilter::Estimate()
    WriteDataFile();
    AddMatlabData(updateStat.measStat);
    AddMatlabFilterData(updateStat);
+   AddJsonFilterData(updateStat);
 
 
    #ifdef DEBUG_ESTIMATION
