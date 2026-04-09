@@ -1218,6 +1218,12 @@ bool SmootherBase::Initialize()
                                   "_backfilter" + GmatFileUtil::ParseFileExtension(matFileName, true);
       filter->SetStringParameter("MatlabFile", filterMatFile);
    }
+   if (jsonFileName != "")
+   {
+      std::string filterJsonFile = GmatFileUtil::ParsePathName(jsonFileName) + GmatFileUtil::ParseFileName(jsonFileName, true) +
+                                   "_backfilter" + GmatFileUtil::ParseFileExtension(jsonFileName, true);
+      filter->SetStringParameter("DataFile", filterJsonFile);
+   }
 
    // Don't write these files if not in Verbose or Debug
    if (textFileMode != "Verbose" && textFileMode != "Debug")
@@ -1672,6 +1678,7 @@ void SmootherBase::FindTimeStep()
             smootherStat.covVNB.SetSize(updateStat.covVNB.GetNumRows(), updateStat.covVNB.GetNumColumns());
             smootherStat.covVNB = updateStat.covVNB;
             AddMatlabSmootherData(smootherStat);
+            AddJsonSmootherData(smootherStat);
 
             resetState = true;
          }
@@ -1873,6 +1880,7 @@ void SmootherBase::Estimate()
 
       smootherStats.push_back(smootherStat);
       AddMatlabSmootherData(smootherStat);
+      AddJsonSmootherData(smootherStat);
 
       // Increment to next index
       AdvanceEpoch();
@@ -2015,6 +2023,9 @@ void SmootherBase::RunComplete()
       matWriter->CloseFile();
    }
 
+   if (writeJsonFile)
+      WriteJsonData();
+
    #ifdef DEBUG_RUNCOMPLETE
       MessageInterface::ShowMessage("SmootherBase::completed RunComplete()\n");
    #endif
@@ -2052,6 +2063,7 @@ void SmootherBase::SmootherUpdate()
       smootherStat.covVNB = covVNB;
 
       AddMatlabSmootherData(smootherStat);
+      AddJsonSmootherData(smootherStat);
       smootherStats.push_back(smootherStat);
 
       //resetState = true;
@@ -2664,6 +2676,179 @@ bool SmootherBase::WriteMatData()
    MessageInterface::ShowMessage("Finished Writing Smoother MATLAB File.\n\n");
 
    return retval;
+}
+
+
+static std::vector<std::vector<Real>> RmatrixToVec(const Rmatrix &m)
+{
+   std::vector<std::vector<Real>> result;
+   if (!m.IsSized())
+      return result;
+   Integer nr = m.GetNumRows(), nc = m.GetNumColumns();
+   result.resize(nr);
+   for (Integer r = 0; r < nr; ++r)
+   {
+      result[r].resize(nc);
+      for (Integer c = 0; c < nc; ++c)
+         result[r][c] = m(r, c);
+   }
+   return result;
+}
+
+//------------------------------------------------------------------------------
+//  void AddJsonSmootherData(const SmootherInfoType &smootherStat)
+//------------------------------------------------------------------------------
+/**
+ * Accumulates a JSON entry for a smoother update, to be written at RunComplete.
+ */
+//------------------------------------------------------------------------------
+void SmootherBase::AddJsonSmootherData(const SmootherInfoType &smootherStat)
+{
+   if (!writeJsonFile)
+      return;
+
+   SmootherJsonEntry entry;
+
+   // Convert epoch to UTC Gregorian string
+   bool handleLeapSecond;
+   GmatTime utcMjdEpoch = theTimeConverter->Convert(smootherStat.epoch,
+         TimeSystemConverter::A1MJD, TimeSystemConverter::UTCMJD,
+         GmatTimeConstants::JD_JAN_5_1941, &handleLeapSecond);
+   entry.epochUtc = theTimeConverter->ConvertMjdToGregorian(utcMjdEpoch.GetMjd(), handleLeapSecond);
+
+   entry.isObs  = smootherStat.isObs;
+   entry.state  = smootherStat.state;
+   entry.cov    = RmatrixToVec(smootherStat.cov);
+   entry.covVNB = RmatrixToVec(smootherStat.covVNB);
+
+   if (smootherStat.isObs)
+   {
+      entry.measNum    = smootherStat.measStat.recNum;
+      entry.residual   = smootherStat.measStat.residual;
+      entry.scaledResid = smootherStat.measStat.scaledResid;
+      entry.editFlag   = smootherStat.measStat.removedReason;
+   }
+
+   jsonSmootherData.push_back(entry);
+}
+
+
+//------------------------------------------------------------------------------
+//  void WriteJsonContent(std::ofstream &outFile)
+//------------------------------------------------------------------------------
+/**
+ * Overrides Estimator::WriteJsonContent to write the "SmootherUpdates" section
+ * of the JSON file.
+ */
+//------------------------------------------------------------------------------
+void SmootherBase::WriteJsonContent(std::ofstream &outFile)
+{
+   std::stringstream fmt;
+   fmt.precision(15);
+
+   outFile << "\n    \"SmootherUpdates\" : [\n";
+
+   for (Integer i = 0; i < (Integer)jsonSmootherData.size(); ++i)
+   {
+      const SmootherJsonEntry &entry = jsonSmootherData[i];
+
+      if (i != 0)
+         outFile << ",\n";
+      outFile << "        {\n";
+      outFile << "            \"Epoch\" : \"" << entry.epochUtc << "\",\n";
+      outFile << "            \"IsObservation\" : " << (entry.isObs ? "true" : "false") << ",\n";
+
+      // State
+      outFile << "            \"State\" : [";
+      for (Integer j = 0; j < (Integer)entry.state.size(); ++j)
+      {
+         if (j != 0) outFile << ", ";
+         fmt << entry.state[j];
+         outFile << fmt.str();
+         fmt.str("");
+      }
+      outFile << "],\n";
+
+      // Covariance
+      outFile << "            \"Covariance\" : [";
+      for (Integer r = 0; r < (Integer)entry.cov.size(); ++r)
+      {
+         if (r != 0) outFile << ", ";
+         outFile << "[";
+         for (Integer c = 0; c < (Integer)entry.cov[r].size(); ++c)
+         {
+            if (c != 0) outFile << ", ";
+            fmt << entry.cov[r][c];
+            outFile << fmt.str();
+            fmt.str("");
+         }
+         outFile << "]";
+      }
+      outFile << "]";
+
+      if (dataFileStyle == "Verbose")
+      {
+         // CovarianceVNB
+         if (!entry.covVNB.empty())
+         {
+            outFile << ",\n            \"CovarianceVNB\" : [";
+            for (Integer r = 0; r < (Integer)entry.covVNB.size(); ++r)
+            {
+               if (r != 0) outFile << ", ";
+               outFile << "[";
+               for (Integer c = 0; c < (Integer)entry.covVNB[r].size(); ++c)
+               {
+                  if (c != 0) outFile << ", ";
+                  fmt << entry.covVNB[r][c];
+                  outFile << fmt.str();
+                  fmt.str("");
+               }
+               outFile << "]";
+            }
+            outFile << "]";
+         }
+      }
+
+      if (entry.isObs)
+      {
+         fmt << ",\n            \"MeasurementNumber\" : " << entry.measNum;
+         outFile << fmt.str();
+         fmt.str("");
+
+         outFile << ",\n            \"Residual\" : [";
+         for (Integer j = 0; j < (Integer)entry.residual.size(); ++j)
+         {
+            if (j != 0) outFile << ", ";
+            fmt << entry.residual[j];
+            outFile << fmt.str();
+            fmt.str("");
+         }
+         outFile << "]";
+
+         if (dataFileStyle == "Verbose")
+         {
+            outFile << ",\n            \"ScaledResidual\" : [";
+            for (Integer j = 0; j < (Integer)entry.scaledResid.size(); ++j)
+            {
+               if (j != 0) outFile << ", ";
+               fmt << entry.scaledResid[j];
+               outFile << fmt.str();
+               fmt.str("");
+            }
+            outFile << "]";
+         }
+
+         outFile << ",\n            \"EditFlag\" : ";
+         if (entry.editFlag.empty() || entry.editFlag == "N")
+            outFile << "null";
+         else
+            outFile << "\"" << entry.editFlag << "\"";
+      }
+
+      outFile << "\n        }";
+   }
+
+   outFile << "\n    ]\n\n";
 }
 
 

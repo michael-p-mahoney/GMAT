@@ -168,6 +168,25 @@ protected:
    /// Indexing for the .mat smoother elements
    std::map<std::string, Integer> matSmootherIndex;
 
+   /// JSON entry for a single smoother update
+   struct SmootherJsonEntry
+   {
+      std::string epochUtc;   ///< UTC Gregorian epoch string
+      bool        isObs;      ///< true if a measurement-update epoch
+      RealArray   state;
+      std::vector<std::vector<Real>> cov;
+      std::vector<std::vector<Real>> covVNB;
+      Integer     measNum;    ///< Observation record number (-1 if not a measurement update)
+      RealArray   residual;
+      RealArray   scaledResid;
+      std::string editFlag;
+
+      SmootherJsonEntry() : isObs(false), measNum(-1) {}
+   };
+
+   /// Accumulated smoother JSON entries, written at RunComplete
+   std::vector<SmootherJsonEntry> jsonSmootherData;
+
    /// Parameter IDs for the Smoother
    enum
    {
@@ -281,6 +300,9 @@ protected:
    virtual EstimatorException BackFilterExceptionMessage(BaseException &ex);
 
    virtual std::string GetMeasurementResidualTitles();
+
+   virtual void           AddJsonSmootherData(const SmootherInfoType &smootherStat);
+   virtual void           WriteJsonContent(std::ofstream &outFile) override;
 };
 
 #endif /* SmootherBase_hpp */
