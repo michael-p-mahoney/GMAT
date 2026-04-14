@@ -6151,12 +6151,15 @@ void GmatMainFrame::UpdateAdvancedGuiMode(int status)
    // Update menu and tools depends on the status
    if (status == 1)
    {
-      gmatAppData->GetResourceTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHITE"));
-      gmatAppData->GetMissionTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHITE"));
-      gmatAppData->GetOutputTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHITE"));
+      // Use the system window colour so the panel respects dark mode on macOS
+      // (previously hardcoded WHITE, which turned the panel white in dark mode)
+      wxColour bg = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+      gmatAppData->GetResourceTree()->SetBackgroundColour(bg);
+      gmatAppData->GetMissionTree()->SetBackgroundColour(bg);
+      gmatAppData->GetOutputTree()->SetBackgroundColour(bg);
+      gmatAppData->GetResourceTree()->Refresh();
+      gmatAppData->GetMissionTree()->Refresh();
+      gmatAppData->GetOutputTree()->Refresh();
       gmatAppData->GetMissionTree()->EnableShowScript(true);
       theMenuBar->Enable(MENU_FILE_SAVE_SCRIPT, true);
       theMenuBar->Enable(MENU_FILE_SAVE_SCRIPT_AS, true);
@@ -6164,14 +6167,21 @@ void GmatMainFrame::UpdateAdvancedGuiMode(int status)
    }
    else if (status == 2)
    {
-      // gmatAppData->GetResourceTree()->
-      //    SetForegroundColour(wxTheColourDatabase->Find("ORANGE"));
-      gmatAppData->GetResourceTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHEAT"));
-      gmatAppData->GetMissionTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHEAT"));
-      gmatAppData->GetOutputTree()->
-         SetBackgroundColour(wxTheColourDatabase->Find("WHEAT"));
+      // Wheat tint indicates non-savable (#Include) mode.
+      // Blend the system window colour 30% toward wheat so the tint is
+      // visible in both light and dark modes rather than using a fixed colour.
+      wxColour base = wxSystemSettings::GetColour(wxSYS_COLOUR_WINDOW);
+      wxColour wheatRef(245, 222, 179);  // classic wheat RGB
+      wxColour tinted(
+         (unsigned char)(base.Red()   * 0.70 + wheatRef.Red()   * 0.30),
+         (unsigned char)(base.Green() * 0.70 + wheatRef.Green() * 0.30),
+         (unsigned char)(base.Blue()  * 0.70 + wheatRef.Blue()  * 0.30));
+      gmatAppData->GetResourceTree()->SetBackgroundColour(tinted);
+      gmatAppData->GetMissionTree()->SetBackgroundColour(tinted);
+      gmatAppData->GetOutputTree()->SetBackgroundColour(tinted);
+      gmatAppData->GetResourceTree()->Refresh();
+      gmatAppData->GetMissionTree()->Refresh();
+      gmatAppData->GetOutputTree()->Refresh();
       gmatAppData->GetMissionTree()->EnableShowScript(false);
       theMenuBar->Enable(MENU_FILE_SAVE_SCRIPT, false);
       theMenuBar->Enable(MENU_FILE_SAVE_SCRIPT_AS, false);
