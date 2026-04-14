@@ -550,8 +550,7 @@ GmatMainFrame::GmatMainFrame(wxWindow *parent,  const wxWindowID id,
                            wxNO_BORDER | wxSW_3D | wxCLIP_CHILDREN);
 
 #ifdef __WXMAC__
-   //theMainWinSetDefaultSize(wxSize(275, h));
-   theMainWin->SetDefaultSize(wxSize(w, h));
+   theMainWin->SetDefaultSize(wxSize(220, h));
 #else
    //theMainWin->SetDefaultSize(wxSize(200, h));
    // Try 220 since Mission page has one more panel to show (LOJ: 2011.08.02)

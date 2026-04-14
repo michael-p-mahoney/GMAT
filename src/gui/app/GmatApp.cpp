@@ -233,9 +233,6 @@ bool GmatApp::OnInit()
          // set default size
          wxSize size = wxSize(800, 600);
          wxPoint position = wxDefaultPosition;
-         #ifdef __WXMAC__
-         position = wxPoint(0,25); // put the main frame in the upper left corner
-         #endif
          
          // for Windows
          #ifdef __WXMSW__
@@ -299,9 +296,10 @@ bool GmatApp::OnInit()
          #ifdef __LINUX__
             size = wxSize(1024, 768);
          #endif
-         // Mac doesn't look right, either
+         // Mac: start maximized (size is overridden by Maximize() below)
          #ifdef __WXMAC__
-            size = wxSize(235,900);
+            size = wxSize(wxSystemSettings::GetMetric(wxSYS_SCREEN_X),
+                          wxSystemSettings::GetMetric(wxSYS_SCREEN_Y));
          #endif
          
          // Set icon file from the startup file
@@ -432,25 +430,21 @@ bool GmatApp::OnInit()
             ("GmatApp::OnInit() size=%dx%d\n", size.GetWidth(), size.GetHeight());
          #endif
          
-         // Mac user rather smaller frame and top left corner and show it.
          // (the frames, unlike simple controls, are not shown when created
          // initially)
-         #ifndef __WXMAC__
-         #ifdef __WXMSW__
-         // if upper left is negative, then maximize
+         #ifdef __WXMAC__
+         // macOS: always open maximized, matching Windows default behaviour
+         theMainFrame->Maximize();
+         #elif defined(__WXMSW__)
+         // Windows: restore maximized state if previously maximized
          if (windowX < 0)
          {
             theMainFrame->Maximize();
             theMainFrame->CenterOnScreen(wxBOTH);
          }
          #else
-         // On Linux, open at default (1024x768) size in upper left of screen
+         // Linux: open at default size in upper left of screen
          theMainFrame->SetPosition(wxPoint(32,32));
-
-         // Here are the maximized settings:
-         // theMainFrame->Maximize();
-         // theMainFrame->CenterOnScreen(wxBOTH);
-         #endif
          #endif
          
          if (startMatlabServer)
