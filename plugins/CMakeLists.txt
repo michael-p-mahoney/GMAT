@@ -134,6 +134,7 @@ OPTION(PLUGIN_STATION "Station Plugin" ON)
 OPTION(PLUGIN_THRUSTFILE "ThrustFile Plugin" ON)
 OPTION(PLUGIN_TLEPROPAGATOR "TLEPropagator Plugin" ON)
 OPTION(PLUGIN_YUKONOPTIMIZER "YukonOptimizer Plugin" ON)
+CMAKE_DEPENDENT_OPTION(PLUGIN_IPOPTOPTIMIZER "IPOPTOptimizer Plugin" ON "GMAT_USE_IPOPT" OFF)
 
 # Variable used to collect a list of all enabled plugins
 SET(PluginTargets "")
@@ -376,6 +377,14 @@ endif()
 
 
 # ====================================================================
+# IPOPTOptimizer Plugin
+if (PLUGIN_IPOPTOPTIMIZER)
+  SET(PLUGINDIR "IPOPTOptimizerPlugin/src/base")
+  ADD_SUBDIRECTORY(${PLUGINDIR})
+  GET_DIRECTORY_PROPERTY(tmp DIRECTORY ${PLUGINDIR} DEFINITION TargetName)
+  SET(PluginTargets ${PluginTargets} ${tmp})
+endif()
+
 # YukonOptimizer Plugin
 if (PLUGIN_YUKONOPTIMIZER)
   SET(PLUGINDIR "YukonOptimizerPlugin/src/base")
