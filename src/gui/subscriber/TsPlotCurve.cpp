@@ -44,7 +44,7 @@ TsPlotCurve::TsPlotCurve() :
    showHiLow         (false),
    baseColor         (0xff,0x00,0x00),
    lineWidth         (3),
-   lineStyle         (wxSOLID),
+   lineStyle         (wxPENSTYLE_SOLID),
    penIsDown         (true),
    lastPointPlotted  (0)
 {
@@ -556,13 +556,13 @@ int TsPlotCurve::GetWidth()
  *    wxSTIPPLE   Use the stipple bitmap.
  *    wxUSER_DASH    Use the user dashes: see wxPen::SetDashes.
  */
-void TsPlotCurve::SetStyle(int ls)
+void TsPlotCurve::SetStyle(wxPenStyle ls)
 {
    lineStyle = ls;
 }
 
 
-int TsPlotCurve::GetStyle()
+wxPenStyle TsPlotCurve::GetStyle()
 {
    return lineStyle;
 }

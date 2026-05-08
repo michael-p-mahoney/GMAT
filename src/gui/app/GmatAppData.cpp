@@ -531,8 +531,12 @@ GmatAppData::GmatAppData()
    #endif
    
    // Set font
-   theFont = wxFont(theFontSize, wxMODERN, wxNORMAL, wxNORMAL);
-   theScriptFont = wxFont(theScriptFontSize, wxMODERN, wxNORMAL, wxNORMAL);
+//   theFont = wxFont(theFontSize, wxMODERN, wxNORMAL, wxNORMAL);
+   wxFontInfo fontSettings(theFontSize);
+   fontSettings.Family(wxFONTFAMILY_MODERN);
+   theFont = wxFont(fontSettings);
+   theScriptFont = wxFont(fontSettings);
+   theScriptFont.SetPointSize(theScriptFontSize);
    
    // Set the global wx config, read from local directory (GMAT.ini)
    wxFileConfig *pConfig = new wxFileConfig(wxEmptyString, wxEmptyString, "GMAT.ini", 

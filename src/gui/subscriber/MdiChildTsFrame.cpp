@@ -770,7 +770,7 @@ void MdiChildTsFrame::CurveSettings(bool useLines, Integer lineWidth,
             TsPlotCurve *curve = mXyPlot->GetPlotCurve(i);
             curve->UseLine(useLines);
             curve->SetWidth(lineWidth);
-            curve->SetStyle(lineStyle);
+            curve->SetStyle((wxPenStyle)lineStyle);
             curve->UseMarker(useMarkers);
             curve->SetMarkerSize(markerSize);
             if (marker == -1)
@@ -786,7 +786,7 @@ void MdiChildTsFrame::CurveSettings(bool useLines, Integer lineWidth,
             TsPlotCurve *curve = mXyPlot->GetPlotCurve(forCurve);
             curve->UseLine(useLines);
             curve->SetWidth(lineWidth);
-            curve->SetStyle(lineStyle);
+            curve->SetStyle((wxPenStyle)lineStyle);
             curve->UseMarker(useMarkers);
             curve->SetMarkerSize(markerSize);
             if (marker == -1)

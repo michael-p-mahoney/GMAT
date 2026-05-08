@@ -289,7 +289,7 @@ void DecoratedTree::DrawOutline(wxTreeItemId id)
     
     while (current > (wxTreeItemId)0) {
         visible = GetBoundingRect(current, bound, TRUE);
-        dc.SetPen(wxPen(wxColour(0xaf, 0xaf, 0xaf), 1, wxSOLID));
+        dc.SetPen(wxPen(wxColour(0xaf, 0xaf, 0xaf), 1, wxPENSTYLE_SOLID));
 
         // Top and bottom
         dc.DrawLine(bound.x, bound.y-1, w-offset, bound.y-1);
@@ -335,7 +335,7 @@ void DecoratedTree::DrawBoxes(wxTreeItemId id)
     
     while (current > (wxTreeItemId)0) {
        visible = GetBoundingRect(current, bound, TRUE);
-       dc.SetPen(wxPen(wxColour(0xaf, 0xaf, 0xaf), 1, wxSOLID));
+       dc.SetPen(wxPen(wxColour(0xaf, 0xaf, 0xaf), 1, wxPENSTYLE_SOLID));
 
        if ((visible)) {                // Draw decorations on visible nodes
           for (int i = 0; i < boxCount; ++i) {

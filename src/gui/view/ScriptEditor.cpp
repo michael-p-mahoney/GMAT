@@ -161,7 +161,12 @@ ScriptEditor::ScriptEditor(wxWindow *parent, bool notifyChange, wxWindowID id,
    SetReadOnly(GmatEditor::globalCommonPrefs.readOnlyInitial);
    SetWrapMode(GmatEditor::globalCommonPrefs.wrapModeInitial?
                wxSTC_WRAP_WORD: wxSTC_WRAP_NONE);
-   wxFont font(10, wxMODERN, wxNORMAL, wxNORMAL);
+
+   //wxFont font(10, wxMODERN, wxNORMAL, wxNORMAL);
+   wxFontInfo fontSettings(10);
+   fontSettings.Family(wxFONTFAMILY_MODERN);
+   wxFont font(fontSettings);
+
    StyleSetFont(wxSTC_STYLE_DEFAULT, font);
    StyleSetForeground(wxSTC_STYLE_DEFAULT, *wxBLACK);
    StyleSetBackground(wxSTC_STYLE_DEFAULT, *wxWHITE);
@@ -1314,7 +1319,8 @@ void ScriptEditor::OnStyleNeeded(wxStyledTextEvent &event)
          // If this is a blank line, set default style and move on
          if (startPos == endPos)
          {
-            StartStyling(startPos, 255);
+            // StartStyling(startPos, 255);
+            StartStyling(startPos);
             SetStyling(0, 0);
             endStyled = GetEndStyled();
             continue;
@@ -1336,7 +1342,8 @@ void ScriptEditor::OnStyleNeeded(wxStyledTextEvent &event)
 
       if (startPos == endPos)
       {
-         StartStyling(startPos, 255);
+         // StartStyling(startPos, 255);
+         StartStyling(startPos);
          SetStyling(0, 0);
          endStyled = GetEndStyled();
          ApplyFoldLevels(startLine, true);
@@ -1368,7 +1375,8 @@ void ScriptEditor::OnStyleNeeded(wxStyledTextEvent &event)
          int endPos = GetLineEndPosition(startLine);
          if (startPos == endPos)
          {
-            StartStyling(startPos, 255);
+            // StartStyling(startPos, 255);
+            StartStyling(startPos);
             SetStyling(0, 0);
             endStyled = GetEndStyled();
             continue;
@@ -1392,7 +1400,7 @@ void ScriptEditor::OnStyleNeeded(wxStyledTextEvent &event)
          }
          if (startPos == endPos)
          {
-            StartStyling(startPos, 255);
+            StartStyling(startPos);
             SetStyling(0, 0);
             endStyled = GetEndStyled();
             continue;
@@ -1402,7 +1410,7 @@ void ScriptEditor::OnStyleNeeded(wxStyledTextEvent &event)
          mStringBlockLines++;
       }
 
-      StartStyling(GetEndStyled(), 255);
+      StartStyling(GetEndStyled());
       SetStyling(2, 0);
    }
    return;
@@ -1521,7 +1529,9 @@ bool ScriptEditor::InitializePrefs(const wxString &name)
    int index;
    for (index = 0; index < wxSTC_STYLE_LASTPREDEFINED; index++)
    {
-      wxFont font(10, wxMODERN, wxNORMAL, wxNORMAL);
+      //wxFont font(10, wxMODERN, wxNORMAL, wxNORMAL);
+      wxFontInfo fontSettings(10);
+      fontSettings.Family(wxFONTFAMILY_MODERN);wxFont font(fontSettings);
       StyleSetFont(index, font);
    }
    
@@ -1541,8 +1551,8 @@ bool ScriptEditor::InitializePrefs(const wxString &name)
          
          const GmatEditor::StyleInfoType &curType =
             GmatEditor::globalStylePrefs[styleType];
-         wxFont font(curType.fontsize, wxMODERN, wxNORMAL, wxNORMAL, false,
-                     curType.fontname);
+         wxFont font(curType.fontsize, wxFONTFAMILY_MODERN, wxFONTSTYLE_NORMAL,
+               wxFONTWEIGHT_NORMAL, false, curType.fontname);
          StyleSetFont(index, font);
          
          if (curType.foreground)
@@ -1660,7 +1670,7 @@ void ScriptEditor::ApplySyntaxHighlight(int fromPos, int toPos)
    std::string currentCharSet;
 
    // Clear the current style and set it to the default style
-   StartStyling(fromPos, 255);
+   StartStyling(fromPos);
    SetStyling(toPos - fromPos, 0);
    int lastPos = GetLastPosition();
    bool isCurrCharNum = false;
@@ -1796,7 +1806,7 @@ void ScriptEditor::ApplySyntaxHighlight(int fromPos, int toPos)
          }
       }
 
-      StartStyling(previousPos, 255);
+      StartStyling(previousPos);
       if (currentStyle == 1)
          SetStyling(currentPos - previousPos + 1, currentStyle);
       else
@@ -1807,7 +1817,7 @@ void ScriptEditor::ApplySyntaxHighlight(int fromPos, int toPos)
 
    if (currentPos == toPos)
    {
-      StartStyling(currentPos, 255);
+      StartStyling(currentPos);
       SetStyling(0, 0);
    }
 

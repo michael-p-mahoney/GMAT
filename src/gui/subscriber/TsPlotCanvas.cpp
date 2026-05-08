@@ -131,7 +131,7 @@ TsPlotCanvas::TsPlotCanvas(wxWindow* parent, wxWindowID id, const wxPoint& pos,
 
    titleFont = *wxSWISS_FONT; //dc.GetFont();
    titleFont.SetPointSize(titleSize);
-   titleFont.SetWeight(wxBOLD);
+   titleFont.SetWeight(wxFONTWEIGHT_BOLD);
 
    axisFont = *wxSWISS_FONT;
    axisFont.SetPointSize(axisLabelSize);
@@ -151,7 +151,7 @@ TsPlotCanvas::TsPlotCanvas(wxWindow* parent, wxWindowID id, const wxPoint& pos,
       // gridColor = backgnd;
       gridColor.Set(backgnd.Red()<<2, backgnd.Green()<<2, backgnd.Blue()<<2);
    #endif
-   gridPen.SetStyle(wxDOT);
+   gridPen.SetStyle(wxPENSTYLE_DOT);
    gridPen.SetColour(gridColor);
 
    legendColor.Set(0xff, 0xff, 0xef);
@@ -509,17 +509,17 @@ void TsPlotCanvas::Refresh(wxDC &dc, bool drawAll)
    if (rescaled || drawAll)
    {
       #ifdef __WXMAC__
-         dc.SetBackground(wxBrush(backgnd, wxSOLID));
+         dc.SetBackground(wxBrush(backgnd, wxBRUSHSTYLE_SOLID));
       #else
-         dc.SetBackground(wxBrush(backgnd, wxTRANSPARENT));
+         dc.SetBackground(wxBrush(backgnd, wxBRUSHSTYLE_TRANSPARENT));
       #endif
       dc.Clear();
 
       dc.SetClippingRegion(left, top, (w-(left+right)), (h-(top+bottom)));
       #ifdef __WXMAC__
-         dc.SetBackground(wxBrush(plotColor, wxSOLID));
+         dc.SetBackground(wxBrush(plotColor, wxBRUSHSTYLE_SOLID));
       #else
-         dc.SetBackground(wxBrush(plotColor, wxTRANSPARENT));
+         dc.SetBackground(wxBrush(plotColor, wxBRUSHSTYLE_TRANSPARENT));
       #endif
       dc.Clear();
       dc.DestroyClippingRegion();
@@ -828,7 +828,7 @@ void TsPlotCanvas::DrawLegend(wxDC &dc)
    }
 
    dc.SetClippingRegion(legendRect);
-   dc.SetBackground(wxBrush(legendColor, wxSOLID /*wxTRANSPARENT*/));
+   dc.SetBackground(wxBrush(legendColor, wxBRUSHSTYLE_SOLID /*wxTRANSPARENT*/));
    dc.Clear();
 
    dc.SetPen(*wxBLACK_PEN);
@@ -1175,7 +1175,7 @@ void TsPlotCanvas::ClearAllCurveData()
 
    dc.SetClippingRegion(plotArea.x, plotArea.y, plotArea.width,
       plotArea.height);
-   dc.SetBackground(wxBrush(plotColor, wxTRANSPARENT));
+   dc.SetBackground(wxBrush(plotColor, wxBRUSHSTYLE_TRANSPARENT));
    dc.Clear();
    dc.DestroyClippingRegion();
 
@@ -1665,11 +1665,11 @@ void TsPlotCanvas::SetLineStyle(int ls, int lineId)
    {
       for (std::vector<TsPlotCurve *>::iterator i = data.begin();
            i != data.end(); ++i)
-         (*i)->SetStyle(ls);
+         (*i)->SetStyle((wxPenStyle)ls);
    }
    else
       if (lineId < (int)data.size())
-         data[lineId]->SetStyle(ls);
+         data[lineId]->SetStyle((wxPenStyle)ls);
 
    // Finally, refresh the display
    for (std::vector<TsPlotCurve *>::iterator i = data.begin(); i != data.end(); ++i)

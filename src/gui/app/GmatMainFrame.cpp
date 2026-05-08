@@ -7003,9 +7003,13 @@ void GmatMainFrame::CompareFiles()
    //=================================================================
    
    // Show compare results in view text dialog
+   wxFontInfo fontSettings(9);
+   fontSettings.Family(wxFONTFAMILY_MODERN);
    ViewTextDialog *viewDlg =
-      new ViewTextDialog(this, _T("CompareFilesResults"), false, wxDefaultPosition,
-                         wxSize(800, 600), wxFont(9, wxMODERN, wxNORMAL, wxNORMAL));
+         new ViewTextDialog(this, _T("CompareFilesResults"), false, wxDefaultPosition,
+                            wxSize(800, 600), wxFont(fontSettings));
+//      new ViewTextDialog(this, _T("CompareFilesResults"), false, wxDefaultPosition,
+//                         wxSize(800, 600), wxFont(9, wxMODERN, wxNORMAL, wxNORMAL));
    wxTextCtrl *textCtrl = viewDlg->GetTextCtrl();
    viewDlg->Show();
    

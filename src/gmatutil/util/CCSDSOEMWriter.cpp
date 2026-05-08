@@ -173,6 +173,17 @@ bool CCSDSOEMWriter::WriteDataSegment()
    
    Integer numPoints = currentOemSegment.GetNumberOfDataPoints();
 
+   std::vector<std::string> epochStrs(numPoints);
+   Real epoch;
+   Rvector data;
+   for (Integer i = 0; i < numPoints; i++)
+   {
+      if (currentOemSegment.GetEpochAndData(i, epoch, data))
+         epochStrs[i] = A1ModJulianToUtcGregorian(epoch, 2);
+      else
+         return false;
+   }
+
    std::stringstream ss;
    if (writeCovariance)
    {
@@ -182,10 +193,11 @@ bool CCSDSOEMWriter::WriteDataSegment()
 
    std::string covRefFrame = currentOemSegment.GetRefFrame();
    
-   Real epoch;
-   Rvector data;
    for (Integer i = 0; i < numPoints; i++)
    {
+      if (i != numPoints - 1 && epochStrs[i] == epochStrs[i + 1])
+         continue;
+
       if (currentOemSegment.GetEpochAndData(i, epoch, data))
       {
          if ((i > 0) && (writeCovariance))
@@ -200,7 +212,7 @@ bool CCSDSOEMWriter::WriteDataSegment()
          //}
          
          const Real *outState = data.GetDataVector();
-         std::string epochStr = A1ModJulianToUtcGregorian(epoch, 2);
+         std::string epochStr = epochStrs[i];
          char strBuff[300];
          sprintf(strBuff, "%s  % 1.15e  % 1.15e  % 1.15e  % 1.15e  % 1.15e  % 1.15e",
             epochStr.c_str(), outState[0], outState[1], outState[2], outState[3],

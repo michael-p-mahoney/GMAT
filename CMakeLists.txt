@@ -297,7 +297,7 @@ if(NOT Matlab_FOUND)
 endif()
 
 # Matlab does not have universal binaries on macOS, so detect which architecture is available
-if(APPLE)
+if(APPLE AND Matlab_FOUND)
   EXECUTE_PROCESS(COMMAND lipo -info "${Matlab_ENGINE_LIBRARY}" OUTPUT_VARIABLE MatlabArch OUTPUT_STRIP_TRAILING_WHITESPACE)
   if(MatlabArch MATCHES "arm64")
     SET(Matlab_OSX_ARCHITECTURE "arm64")

@@ -41,8 +41,8 @@ public:
    void LightenColour(int lighteningFactor = 1);
    void SetWidth(int w);
    int  GetWidth();
-   void SetStyle(int ls);
-   int  GetStyle();
+   void SetStyle(wxPenStyle ls);
+   wxPenStyle GetStyle();
    void HighlightPoint(int index);
    
    bool UseLine();
@@ -121,7 +121,7 @@ protected:
    /// Line width.  This parameter is set for the entire line
    int                  lineWidth;
    /// Line style.  This parameter is set for the entire line
-   int                  lineStyle;
+   wxPenStyle           lineStyle;
    /// Flag indicating that the curve is accepting data
    bool                 penIsDown;
 

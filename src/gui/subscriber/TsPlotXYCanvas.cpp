@@ -370,6 +370,8 @@ void TsPlotXYCanvas::PlotData(wxDC &dc)
          {
             plotPens[n].SetColour((*curve)->GetColour(0));
             plotPens[n].SetWidth((*curve)->GetWidth());
+
+
             plotPens[n].SetStyle((*curve)->GetStyle());
             dc.SetPen(plotPens[n]);
 

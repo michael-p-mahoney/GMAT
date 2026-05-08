@@ -464,8 +464,11 @@ PyObject* PythonInterface::PyFunctionWrapper(const std::string &modName,
    PyObject* getValuePyFunc = PyObject_GetAttrString(catcher, "getvalue");
    PyObject* emptyArgs = PyTuple_Pack(0);
    PyObject *stdOutFromPy = PyObject_CallObject(getValuePyFunc, emptyArgs);
-   std::string outFromPyString = _PyUnicode_AsString(stdOutFromPy);
 
+   std::string outFromPyString;
+   PyObject *bytes;
+   bytes = PyUnicode_AsUTF8String(stdOutFromPy);
+   outFromPyString = PyBytes_AsString(bytes);
    MessageInterface::ShowMessage(outFromPyString);
 
    Py_DECREF(catcher);
@@ -608,8 +611,11 @@ PyObject* PythonInterface::PyExternalFunctionWrapper(const std::string &modName,
    PyObject* getValuePyFunc = PyObject_GetAttrString(catcher, "getvalue");
    PyObject* emptyArgs = PyTuple_Pack(0);
    PyObject *stdOutFromPy = PyObject_CallObject(getValuePyFunc, emptyArgs);
-   std::string outFromPyString = _PyUnicode_AsString(stdOutFromPy);
 
+   std::string outFromPyString;
+   PyObject *bytes;
+   bytes = PyUnicode_AsUTF8String(stdOutFromPy);
+   outFromPyString = PyBytes_AsString(bytes);
    MessageInterface::ShowMessage(outFromPyString);
 
    Py_DECREF(catcher);
@@ -654,8 +660,11 @@ void PythonInterface::PyErrorMsg(PyObject* pType, PyObject* pValue,
       if (v)
       {
 #ifdef IS_PY3K
-         msg = std::string(_PyUnicode_AsString(t));
-         msg += ": " + std::string(_PyUnicode_AsString(v));
+         std::string outFromPyString;
+         PyObject *bytes;
+         bytes = PyUnicode_AsUTF8String(t);
+         outFromPyString = PyBytes_AsString(bytes);
+         MessageInterface::ShowMessage(outFromPyString);
 #else
          msg = std::string(PyPyString_AsStringString_AsString(t));
          msg += ": " + std::string(PyString_AsString(v));

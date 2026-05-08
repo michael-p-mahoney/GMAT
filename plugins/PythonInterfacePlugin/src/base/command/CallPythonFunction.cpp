@@ -631,7 +631,9 @@ CallPythonFunction::PyIfVariant CallPythonFunction::ConvertFromPyObject(
                #ifdef DEBUG_EXECUTION
                   MessageInterface::ShowMessage("A Python String was returned.\n");
                #endif
-               retval = _PyUnicode_AsString(member);
+               PyObject *bytes;
+               bytes = PyUnicode_AsUTF8String(member);
+               retval = PyBytes_AsString(bytes);
             }
          #else
             else if (PyBytes_Check(member))
