@@ -122,15 +122,17 @@ TableTemplate<T>::TableTemplate(int r, int c, const T* array)
 //  TableTemplate(const TableTemplate<T> &Table)
 //------------------------------------------------------------------------------
 template <class T>
-TableTemplate<T>::TableTemplate(const TableTemplate<T> &Table) 
+TableTemplate<T>::TableTemplate(const TableTemplate<T> &Table)
+   : elementD((T*) 0), rowsD(0), colsD(0), isSizedD(false)
 {
+   // Copying an unsized table is legal: the result is also unsized. Throwing
+   // here would break the regular-type contract that container types (e.g.
+   // std::vector) rely on during reallocation of default-constructed elements.
    if (Table.IsSized() == false)
-   {
-      throw TableTemplateExceptions::UnsizedTable();
-   }
+      return;
 
    init(Table.rowsD, Table.colsD);
-    
+
    for (int i = 0; i < rowsD*colsD; i++)
    {
       elementD[i] = Table.elementD[i];
@@ -232,11 +234,25 @@ TableTemplate<T>::operator()(int r, int c) const
 //------------------------------------------------------------------------------
 template <class T>
 TableTemplate<T>&
-TableTemplate<T>::operator=(const TableTemplate<T> &table) 
+TableTemplate<T>::operator=(const TableTemplate<T> &table)
 {
+   if (this == &table)
+      return *this;
+
+   // Assigning from an unsized table reverts the target to unsized. Throwing
+   // here would break the regular-type contract that container types rely on
+   // when copying default-constructed elements.
    if (table.IsSized() == false)
    {
-      throw TableTemplateExceptions::UnsizedTable();
+      if (isSizedD)
+      {
+         delete[] elementD;
+         elementD = (T*) 0;
+         rowsD = 0;
+         colsD = 0;
+         isSizedD = false;
+      }
+      return *this;
    }
 
    if (isSizedD == false)
@@ -252,7 +268,7 @@ TableTemplate<T>::operator=(const TableTemplate<T> &table)
          elementD[i] = table.elementD[i];
       }
    }
-   
+
    return *this;
 }
 
