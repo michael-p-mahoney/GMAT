@@ -905,7 +905,14 @@ void IPOPTOptimizer::CheckCompletion()
 
    if (shared.requestType == SharedEval::DONE)
    {
-      // IPOPT has finished
+      // IPOPT has finished.  shared.x was populated by GmatTNLP::finalize_solution
+      // with IPOPT's final converged solution.  Copy it into variable[] so any
+      // post-Optimize mission run / report / GetSolverVariable query reflects
+      // the optimum and not whatever line-search trial point happened to be
+      // IPOPT's most recent eval_* callback.
+      for (int i = 0; i < variableCount; ++i)
+         variable.at(i) = shared.x[i];
+
       bool didConverge = shared.converged;
       lock.unlock();
 
