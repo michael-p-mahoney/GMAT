@@ -27,6 +27,7 @@
 #include <condition_variable>
 #include <vector>
 #include <atomic>
+#include <ctime>
 
 /**
  * IPOPT-based NLP optimizer for GMAT scripting.
@@ -103,6 +104,7 @@ public:
       OPTIMALITY_TOLERANCE,
       MAXIMUM_ITERATIONS,
       MAXIMUM_FUNCTION_EVALS,
+      MAXIMUM_RUN_TIME,
       USE_CENTRAL_DIFFERENCES,
       OUTPUT_FILE_NAME,
       PRINT_LEVEL,
@@ -146,12 +148,24 @@ public:
    SharedEval              shared;      ///< protected by sharedMtx
    bool                    resultReady  = false;
 
+   /// Cooperative cancel flag.  Set by the destructor (or any future GUI
+   /// abort path) to ask the IPOPT thread to unwind.  intermediate_callback
+   /// and requestEvalIfNeeded both return false to IPOPT when this is true,
+   /// which makes OptimizeTNLP exit through finalize_solution with
+   /// USER_REQUESTED_STOP / NonIpopt_Exception_Thrown.
+   std::atomic<bool>       abortRequested{false};
+
+   /// IPOPT solve start time (set in RunIPOPT, read in intermediate_callback
+   /// for wall-clock budget enforcement).
+   time_t                  nlpStartTime{0};
+
 protected:
    // Optimizer parameters
    Real     feasibilityTolerance;
    Real     optimalityTolerance;
    Integer  maximumIterations;
    Integer  maximumFunctionEvals;
+   Real     maximumRunTime;       ///< seconds; 0 = no wall-clock limit
    bool     useCentralDifferences;
    std::string outputFileName;
    Integer  printLevel;

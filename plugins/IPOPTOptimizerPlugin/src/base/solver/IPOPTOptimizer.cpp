@@ -208,6 +208,52 @@ public:
       return false; // Not needed with L-BFGS
    }
 
+   // ------------------------------------------------------------------
+   // intermediate_callback
+   // Called by IPOPT once per iteration.  We use it as:
+   //   1. Cooperative cancel point — return false if the GMAT side has
+   //      set abortRequested (destructor / future GUI Stop).
+   //   2. Wall-clock budget — return false if MaximumRunTime > 0 and
+   //      elapsed time exceeds it.
+   // Returning false makes IPOPT exit through finalize_solution with
+   // status = USER_REQUESTED_STOP, so the normal DONE handshake still
+   // runs and the GMAT thread is freed.
+   // ------------------------------------------------------------------
+   virtual bool intermediate_callback(Ipopt::AlgorithmMode /*mode*/,
+                                       Ipopt::Index /*iter*/,
+                                       Ipopt::Number /*obj_value*/,
+                                       Ipopt::Number /*inf_pr*/,
+                                       Ipopt::Number /*inf_du*/,
+                                       Ipopt::Number /*mu*/,
+                                       Ipopt::Number /*d_norm*/,
+                                       Ipopt::Number /*regularization_size*/,
+                                       Ipopt::Number /*alpha_du*/,
+                                       Ipopt::Number /*alpha_pr*/,
+                                       Ipopt::Index /*ls_trials*/,
+                                       const Ipopt::IpoptData * /*ip_data*/,
+                                       Ipopt::IpoptCalculatedQuantities * /*ip_cq*/)
+   {
+      if (optimizer->abortRequested.load())
+      {
+         MessageInterface::ShowMessage(
+            "IPOPTOptimizer: abort requested; stopping NLP solve.\n");
+         return false;
+      }
+      if (optimizer->maximumRunTime > 0.0 && optimizer->nlpStartTime > 0)
+      {
+         double elapsed = difftime(time(nullptr), optimizer->nlpStartTime);
+         if (elapsed > optimizer->maximumRunTime)
+         {
+            MessageInterface::ShowMessage(
+               "IPOPTOptimizer: MaximumRunTime (%.1f s) exceeded after "
+               "%.1f s; stopping NLP solve.\n",
+               optimizer->maximumRunTime, elapsed);
+            return false;
+         }
+      }
+      return true;
+   }
+
    virtual void finalize_solution(Ipopt::SolverReturn status,
                                    Ipopt::Index n,
                                    const Ipopt::Number *x,
@@ -262,6 +308,9 @@ private:
    // Post an eval request to the GMAT main thread and wait for results.
    bool requestEvalIfNeeded(int n, const Ipopt::Number *x)
    {
+      if (optimizer->abortRequested.load())
+         return false; // Cancel before we even post
+
       if (xEquals(n, x))
          return true; // Cache hit — IPOPT is re-querying the same point
 
@@ -278,10 +327,17 @@ private:
       MessageInterface::ShowMessage("GmatTNLP: posted FUNC_AND_GRAD request\n");
 #endif
 
-      // Wait for GMAT to deliver results
+      // Wait for GMAT to deliver results — or for an abort
       {
          std::unique_lock<std::mutex> lock(optimizer->sharedMtx);
-         optimizer->cvResult.wait(lock, [this] { return optimizer->resultReady; });
+         optimizer->cvResult.wait(lock, [this] {
+            return optimizer->resultReady || optimizer->abortRequested.load();
+         });
+         if (optimizer->abortRequested.load())
+         {
+            optimizer->resultReady = false;
+            return false; // IPOPT will treat this as a failed eval and stop
+         }
          optimizer->resultReady = false;
 
          // Copy results from shared data into local cache
@@ -311,6 +367,7 @@ const std::string IPOPTOptimizer::PARAMETER_TEXT[
    "OptimalityTolerance",
    "MaximumIterations",
    "MaximumFunctionEvals",
+   "MaximumRunTime",
    "UseCentralDifferences",
    "OutputFileName",
    "PrintLevel"
@@ -323,6 +380,7 @@ const Gmat::ParameterType IPOPTOptimizer::PARAMETER_TYPE[
    Gmat::REAL_TYPE,
    Gmat::INTEGER_TYPE,
    Gmat::INTEGER_TYPE,
+   Gmat::REAL_TYPE,
    Gmat::BOOLEAN_TYPE,
    Gmat::STRING_TYPE,
    Gmat::INTEGER_TYPE
@@ -337,6 +395,7 @@ IPOPTOptimizer::IPOPTOptimizer(const std::string &name) :
    optimalityTolerance  (1.0e-6),
    maximumIterations    (1000),
    maximumFunctionEvals (10000),
+   maximumRunTime       (0.0),   // 0 = unlimited
    useCentralDifferences(false),
    outputFileName       ("IPOPT.out"),
    printLevel           (5),
@@ -355,15 +414,23 @@ IPOPTOptimizer::IPOPTOptimizer(const std::string &name) :
 
 IPOPTOptimizer::~IPOPTOptimizer()
 {
-   // If thread is still running, we need to signal it to stop
+   // If the IPOPT thread is still running (abnormal shutdown -- e.g. GMAT
+   // tearing down a Mission Sequence while Optimize is in progress), ask
+   // it to unwind cooperatively.  abortRequested is checked by
+   // GmatTNLP::intermediate_callback (once per IPOPT iteration) and by
+   // GmatTNLP::requestEvalIfNeeded (each time IPOPT requests an eval);
+   // either path makes OptimizeTNLP return through finalize_solution and
+   // the thread exits.
+   //
+   // The previous implementation tried to signal completion by writing
+   // shared.requestType = DONE and notifying cvResult, but IPOPT isn't
+   // normally waiting on cvResult (only requestEvalIfNeeded is), and DONE
+   // is an IPOPT-to-GMAT signal -- so the notify went to nobody and the
+   // join() could deadlock if IPOPT was inside its own algorithm.
    if (ipoptThreadStarted && ipoptThread.joinable())
    {
-      // Signal IPOPT to stop by marking as done with failure
-      {
-         std::lock_guard<std::mutex> lock(sharedMtx);
-         shared.requestType = SharedEval::DONE;
-         shared.converged   = false;
-      }
+      abortRequested.store(true);
+      cvRequest.notify_all();
       cvResult.notify_all();
       ipoptThread.join();
    }
@@ -375,6 +442,7 @@ IPOPTOptimizer::IPOPTOptimizer(const IPOPTOptimizer &copy) :
    optimalityTolerance  (copy.optimalityTolerance),
    maximumIterations    (copy.maximumIterations),
    maximumFunctionEvals (copy.maximumFunctionEvals),
+   maximumRunTime       (copy.maximumRunTime),
    useCentralDifferences(copy.useCentralDifferences),
    outputFileName       (copy.outputFileName),
    printLevel           (copy.printLevel),
@@ -396,6 +464,7 @@ IPOPTOptimizer& IPOPTOptimizer::operator=(const IPOPTOptimizer &copy)
       optimalityTolerance   = copy.optimalityTolerance;
       maximumIterations     = copy.maximumIterations;
       maximumFunctionEvals  = copy.maximumFunctionEvals;
+      maximumRunTime        = copy.maximumRunTime;
       useCentralDifferences = copy.useCentralDifferences;
       outputFileName        = copy.outputFileName;
       printLevel            = copy.printLevel;
@@ -465,6 +534,7 @@ Real IPOPTOptimizer::GetRealParameter(const Integer id) const
    {
    case FEASIBILITY_TOLERANCE: return feasibilityTolerance;
    case OPTIMALITY_TOLERANCE:  return optimalityTolerance;
+   case MAXIMUM_RUN_TIME:      return maximumRunTime;
    default: break;
    }
    return InternalOptimizer::GetRealParameter(id);
@@ -476,6 +546,7 @@ Real IPOPTOptimizer::SetRealParameter(const Integer id, const Real value)
    {
    case FEASIBILITY_TOLERANCE: feasibilityTolerance = value; return value;
    case OPTIMALITY_TOLERANCE:  optimalityTolerance  = value; return value;
+   case MAXIMUM_RUN_TIME:      maximumRunTime       = value; return value;
    default: break;
    }
    return InternalOptimizer::SetRealParameter(id, value);
@@ -666,6 +737,8 @@ bool IPOPTOptimizer::Initialize()
    pertNumber         = -1;
    currentPertState   = 0;
    evalPhase          = PHASE_NOMINAL;
+   abortRequested.store(false);
+   nlpStartTime       = 0;
    isInitialized      = true;
 
 #ifdef DEBUG_IPOPT_OPTIMIZER
@@ -988,6 +1061,9 @@ void IPOPTOptimizer::RunIPOPT(IPOPTOptimizer *optimizer)
 #ifdef DEBUG_IPOPT_OPTIMIZER
    MessageInterface::ShowMessage("IPOPTOptimizer: IpoptApplication initialized\n");
 #endif
+
+   // Start the wall-clock budget timer that intermediate_callback checks.
+   optimizer->nlpStartTime = time(nullptr);
 
    SmartPtr<TNLP> nlp = new GmatTNLP(optimizer);
    app->OptimizeTNLP(nlp);
