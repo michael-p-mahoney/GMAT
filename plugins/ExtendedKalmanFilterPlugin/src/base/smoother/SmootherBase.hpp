@@ -174,8 +174,8 @@ protected:
       std::string epochUtc;   ///< UTC Gregorian epoch string
       bool        isObs;      ///< true if a measurement-update epoch
       RealArray   state;
-      std::vector<std::vector<Real>> cov;
-      std::vector<std::vector<Real>> covVNB;
+      Rmatrix     cov;
+      Rmatrix     covVNB;
       Integer     measNum;    ///< Observation record number (-1 if not a measurement update)
       RealArray   residual;
       RealArray   scaledResid;

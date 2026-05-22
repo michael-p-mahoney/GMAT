@@ -241,10 +241,10 @@ protected:
       std::string epochUtc;   ///< UTC Gregorian epoch string
       std::string type;       ///< "Initial", "Time", "Measurement", or "Predict"
       RealArray   state;
-      std::vector<std::vector<Real>> cov;
-      std::vector<std::vector<Real>> covVNB;
-      std::vector<std::vector<Real>> processNoise;
-      std::vector<std::vector<Real>> stm;
+      Rmatrix     cov;
+      Rmatrix     covVNB;
+      Rmatrix     processNoise;
+      Rmatrix     stm;
       Integer     measNum;    ///< Observation record number (-1 if not a measurement update)
       RealArray   residual;
       RealArray   scaledResid;

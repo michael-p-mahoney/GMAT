@@ -3475,22 +3475,6 @@ void SeqEstimator::AddMatlabConfigData()
  * measurement-update, to be written at RunComplete.
  */
 //------------------------------------------------------------------------------
-static std::vector<std::vector<Real>> RmatrixToVec(const Rmatrix &m)
-{
-   std::vector<std::vector<Real>> result;
-   if (!m.IsSized())
-      return result;
-   Integer nr = m.GetNumRows(), nc = m.GetNumColumns();
-   result.resize(nr);
-   for (Integer r = 0; r < nr; ++r)
-   {
-      result[r].resize(nc);
-      for (Integer c = 0; c < nc; ++c)
-         result[r][c] = m(r, c);
-   }
-   return result;
-}
-
 void SeqEstimator::AddJsonFilterData(const UpdateInfoType &updateStat)
 {
    if (!writeJsonFile)
@@ -3516,10 +3500,10 @@ void SeqEstimator::AddJsonFilterData(const UpdateInfoType &updateStat)
       entry.type = "Time";
 
    entry.state        = updateStat.state;
-   entry.cov          = RmatrixToVec(updateStat.cov);
-   entry.covVNB       = RmatrixToVec(updateStat.covVNB);
-   entry.processNoise = RmatrixToVec(updateStat.processNoise);
-   entry.stm          = RmatrixToVec(updateStat.stm);
+   entry.cov          = updateStat.cov;
+   entry.covVNB       = updateStat.covVNB;
+   entry.processNoise = updateStat.processNoise;
+   entry.stm          = updateStat.stm;
 
    if (updateStat.isObs)
    {
@@ -3571,14 +3555,14 @@ void SeqEstimator::WriteJsonContent(std::ofstream &outFile)
 
       // Covariance
       outFile << "            \"Covariance\" : [";
-      for (Integer r = 0; r < (Integer)entry.cov.size(); ++r)
+      for (Integer r = 0; r < entry.cov.GetNumRows(); ++r)
       {
          if (r != 0) outFile << ", ";
          outFile << "[";
-         for (Integer c = 0; c < (Integer)entry.cov[r].size(); ++c)
+         for (Integer c = 0; c < entry.cov.GetNumColumns(); ++c)
          {
             if (c != 0) outFile << ", ";
-            fmt << entry.cov[r][c];
+            fmt << entry.cov(r, c);
             outFile << fmt.str();
             fmt.str("");
          }
@@ -3589,17 +3573,17 @@ void SeqEstimator::WriteJsonContent(std::ofstream &outFile)
       if (dataFileStyle == "Verbose")
       {
          // CovarianceVNB
-         if (!entry.covVNB.empty())
+         if (entry.covVNB.IsSized())
          {
             outFile << ",\n            \"CovarianceVNB\" : [";
-            for (Integer r = 0; r < (Integer)entry.covVNB.size(); ++r)
+            for (Integer r = 0; r < entry.covVNB.GetNumRows(); ++r)
             {
                if (r != 0) outFile << ", ";
                outFile << "[";
-               for (Integer c = 0; c < (Integer)entry.covVNB[r].size(); ++c)
+               for (Integer c = 0; c < entry.covVNB.GetNumColumns(); ++c)
                {
                   if (c != 0) outFile << ", ";
-                  fmt << entry.covVNB[r][c];
+                  fmt << entry.covVNB(r, c);
                   outFile << fmt.str();
                   fmt.str("");
                }
@@ -3609,17 +3593,17 @@ void SeqEstimator::WriteJsonContent(std::ofstream &outFile)
          }
 
          // ProcessNoise
-         if (!entry.processNoise.empty())
+         if (entry.processNoise.IsSized())
          {
             outFile << ",\n            \"ProcessNoise\" : [";
-            for (Integer r = 0; r < (Integer)entry.processNoise.size(); ++r)
+            for (Integer r = 0; r < entry.processNoise.GetNumRows(); ++r)
             {
                if (r != 0) outFile << ", ";
                outFile << "[";
-               for (Integer c = 0; c < (Integer)entry.processNoise[r].size(); ++c)
+               for (Integer c = 0; c < entry.processNoise.GetNumColumns(); ++c)
                {
                   if (c != 0) outFile << ", ";
-                  fmt << entry.processNoise[r][c];
+                  fmt << entry.processNoise(r, c);
                   outFile << fmt.str();
                   fmt.str("");
                }
@@ -3629,17 +3613,17 @@ void SeqEstimator::WriteJsonContent(std::ofstream &outFile)
          }
 
          // STM
-         if (!entry.stm.empty())
+         if (entry.stm.IsSized())
          {
             outFile << ",\n            \"STM\" : [";
-            for (Integer r = 0; r < (Integer)entry.stm.size(); ++r)
+            for (Integer r = 0; r < entry.stm.GetNumRows(); ++r)
             {
                if (r != 0) outFile << ", ";
                outFile << "[";
-               for (Integer c = 0; c < (Integer)entry.stm[r].size(); ++c)
+               for (Integer c = 0; c < entry.stm.GetNumColumns(); ++c)
                {
                   if (c != 0) outFile << ", ";
-                  fmt << entry.stm[r][c];
+                  fmt << entry.stm(r, c);
                   outFile << fmt.str();
                   fmt.str("");
                }

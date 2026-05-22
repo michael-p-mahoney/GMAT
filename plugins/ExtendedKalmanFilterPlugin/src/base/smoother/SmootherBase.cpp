@@ -2679,22 +2679,6 @@ bool SmootherBase::WriteMatData()
 }
 
 
-static std::vector<std::vector<Real>> RmatrixToVec(const Rmatrix &m)
-{
-   std::vector<std::vector<Real>> result;
-   if (!m.IsSized())
-      return result;
-   Integer nr = m.GetNumRows(), nc = m.GetNumColumns();
-   result.resize(nr);
-   for (Integer r = 0; r < nr; ++r)
-   {
-      result[r].resize(nc);
-      for (Integer c = 0; c < nc; ++c)
-         result[r][c] = m(r, c);
-   }
-   return result;
-}
-
 //------------------------------------------------------------------------------
 //  void AddJsonSmootherData(const SmootherInfoType &smootherStat)
 //------------------------------------------------------------------------------
@@ -2718,8 +2702,8 @@ void SmootherBase::AddJsonSmootherData(const SmootherInfoType &smootherStat)
 
    entry.isObs  = smootherStat.isObs;
    entry.state  = smootherStat.state;
-   entry.cov    = RmatrixToVec(smootherStat.cov);
-   entry.covVNB = RmatrixToVec(smootherStat.covVNB);
+   entry.cov    = smootherStat.cov;
+   entry.covVNB = smootherStat.covVNB;
 
    if (smootherStat.isObs)
    {
@@ -2771,14 +2755,14 @@ void SmootherBase::WriteJsonContent(std::ofstream &outFile)
 
       // Covariance
       outFile << "            \"Covariance\" : [";
-      for (Integer r = 0; r < (Integer)entry.cov.size(); ++r)
+      for (Integer r = 0; r < entry.cov.GetNumRows(); ++r)
       {
          if (r != 0) outFile << ", ";
          outFile << "[";
-         for (Integer c = 0; c < (Integer)entry.cov[r].size(); ++c)
+         for (Integer c = 0; c < entry.cov.GetNumColumns(); ++c)
          {
             if (c != 0) outFile << ", ";
-            fmt << entry.cov[r][c];
+            fmt << entry.cov(r, c);
             outFile << fmt.str();
             fmt.str("");
          }
@@ -2789,17 +2773,17 @@ void SmootherBase::WriteJsonContent(std::ofstream &outFile)
       if (dataFileStyle == "Verbose")
       {
          // CovarianceVNB
-         if (!entry.covVNB.empty())
+         if (entry.covVNB.IsSized())
          {
             outFile << ",\n            \"CovarianceVNB\" : [";
-            for (Integer r = 0; r < (Integer)entry.covVNB.size(); ++r)
+            for (Integer r = 0; r < entry.covVNB.GetNumRows(); ++r)
             {
                if (r != 0) outFile << ", ";
                outFile << "[";
-               for (Integer c = 0; c < (Integer)entry.covVNB[r].size(); ++c)
+               for (Integer c = 0; c < entry.covVNB.GetNumColumns(); ++c)
                {
                   if (c != 0) outFile << ", ";
-                  fmt << entry.covVNB[r][c];
+                  fmt << entry.covVNB(r, c);
                   outFile << fmt.str();
                   fmt.str("");
                }
