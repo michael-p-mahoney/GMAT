@@ -23,6 +23,7 @@
 #include "IpIpoptApplication.hpp"
 #include "IpTNLP.hpp"
 #include "IpSolveStatistics.hpp"
+#include "IpException.hpp"
 
 #include <cassert>
 #include <cmath>
@@ -1041,37 +1042,96 @@ void IPOPTOptimizer::RunIPOPT(IPOPTOptimizer *optimizer)
 {
    using namespace Ipopt;
 
-   SmartPtr<IpoptApplication> app = IpoptApplicationFactory();
+   // Helper to release the main GMAT thread with a failure status.  Used on
+   // every error path so the main thread doesn't sit forever in
+   // CheckCompletion's cvRequest.wait().
+   auto signalFailure = [optimizer](int statusCode)
+   {
+      {
+         std::lock_guard<std::mutex> lock(optimizer->sharedMtx);
+         auto &sd       = optimizer->shared;
+         sd.requestType = SharedEval::DONE;
+         sd.converged   = false;
+         sd.ipoptStatus = statusCode;
+         // sd.x left untouched: either still the initial guess we
+         // snapshotted below, or IPOPT's most recent eval point.
+      }
+      optimizer->cvRequest.notify_one();
+   };
 
-   // Configure IPOPT
-   app->Options()->SetNumericValue("tol",              optimizer->optimalityTolerance);
-   app->Options()->SetNumericValue("constr_viol_tol",  optimizer->feasibilityTolerance);
-   app->Options()->SetIntegerValue("max_iter",         optimizer->maximumIterations);
-   app->Options()->SetIntegerValue("print_level",      optimizer->printLevel);
-   app->Options()->SetStringValue ("hessian_approximation", "limited-memory");
-   app->Options()->SetStringValue ("derivative_test",  "none");
-   app->Options()->SetStringValue ("output_file",      optimizer->outputFileName);
+   try
+   {
+      // Snapshot the GMAT-side initial guess into shared.x before any IPOPT
+      // setup can fail.  If RunIPOPT throws (or Initialize fails) before
+      // any GmatTNLP eval populates shared.x, CheckCompletion's DONE handler
+      // still copies shared.x back into variable[] -- this snapshot makes
+      // that copy a no-op (initial guess preserved) instead of overwriting
+      // variable[] with zeros from the pre-sized SharedEval buffer.
+      {
+         std::lock_guard<std::mutex> lock(optimizer->sharedMtx);
+         for (int i = 0; i < optimizer->variableCount; ++i)
+            optimizer->shared.x[i] = optimizer->variable.at(i);
+      }
 
-   // Suppress console output if print level is low
-   if (optimizer->printLevel <= 0)
-      app->Options()->SetIntegerValue("print_level", 0);
+      SmartPtr<IpoptApplication> app = IpoptApplicationFactory();
 
-   app->Initialize();
+      // Configure IPOPT
+      app->Options()->SetNumericValue("tol",              optimizer->optimalityTolerance);
+      app->Options()->SetNumericValue("constr_viol_tol",  optimizer->feasibilityTolerance);
+      app->Options()->SetIntegerValue("max_iter",         optimizer->maximumIterations);
+      app->Options()->SetIntegerValue("print_level",      optimizer->printLevel);
+      app->Options()->SetStringValue ("hessian_approximation", "limited-memory");
+      app->Options()->SetStringValue ("derivative_test",  "none");
+      app->Options()->SetStringValue ("output_file",      optimizer->outputFileName);
+
+      // Suppress console output if print level is low
+      if (optimizer->printLevel <= 0)
+         app->Options()->SetIntegerValue("print_level", 0);
+
+      ApplicationReturnStatus initStatus = app->Initialize();
+      if (initStatus != Solve_Succeeded)
+      {
+         MessageInterface::ShowMessage(
+            "IPOPTOptimizer: IpoptApplication::Initialize() failed with "
+            "status %d; IPOPT will not run.\n", (int)initStatus);
+         signalFailure(static_cast<int>(initStatus));
+         return;
+      }
 
 #ifdef DEBUG_IPOPT_OPTIMIZER
-   MessageInterface::ShowMessage("IPOPTOptimizer: IpoptApplication initialized\n");
+      MessageInterface::ShowMessage("IPOPTOptimizer: IpoptApplication initialized\n");
 #endif
 
-   // Start the wall-clock budget timer that intermediate_callback checks.
-   optimizer->nlpStartTime = time(nullptr);
+      // Start the wall-clock budget timer that intermediate_callback checks.
+      optimizer->nlpStartTime = time(nullptr);
 
-   SmartPtr<TNLP> nlp = new GmatTNLP(optimizer);
-   app->OptimizeTNLP(nlp);
+      SmartPtr<TNLP> nlp = new GmatTNLP(optimizer);
+      app->OptimizeTNLP(nlp);
 
-   // finalize_solution in GmatTNLP signals the main thread, so we're done.
+      // finalize_solution in GmatTNLP signals the main thread, so we're done.
 #ifdef DEBUG_IPOPT_OPTIMIZER
-   MessageInterface::ShowMessage("IPOPTOptimizer: IPOPT thread returning\n");
+      MessageInterface::ShowMessage("IPOPTOptimizer: IPOPT thread returning\n");
 #endif
+   }
+   catch (Ipopt::IpoptException &e)
+   {
+      MessageInterface::ShowMessage(
+         "IPOPTOptimizer: IPOPT exception during solve: %s\n",
+         e.Message().c_str());
+      signalFailure(static_cast<int>(Unrecoverable_Exception));
+   }
+   catch (std::exception &e)
+   {
+      MessageInterface::ShowMessage(
+         "IPOPTOptimizer: std::exception during IPOPT solve: %s\n", e.what());
+      signalFailure(static_cast<int>(NonIpopt_Exception_Thrown));
+   }
+   catch (...)
+   {
+      MessageInterface::ShowMessage(
+         "IPOPTOptimizer: unknown exception during IPOPT solve.\n");
+      signalFailure(static_cast<int>(NonIpopt_Exception_Thrown));
+   }
 }
 
 // ============================================================================
