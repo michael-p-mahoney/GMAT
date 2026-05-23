@@ -121,6 +121,65 @@
           </row>
 
           <row>
+            <entry><guilabel>DataFile</guilabel></entry>
+
+            <entry><para>Path and file name for an output JSON file containing
+            per-update filter state, covariance, residuals, and edit flags.
+            Leaving this parameter unset means no JSON file will be generated.
+            Unlike <guilabel>MatlabFile</guilabel>, the JSON output does not
+            require GMAT to be connected to MATLAB. See remarks below for the
+            file schema.</para><variablelist>
+                <varlistentry>
+                  <term>Data Type</term>
+
+                  <listitem>
+                    <para>String</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Allowed Values</term>
+
+                  <listitem>
+                    <para>Unset, or a valid path and file name</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Access</term>
+
+                  <listitem>
+                    <para>Set</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Default Value</term>
+
+                  <listitem>
+                    <para><guilabel>None</guilabel></para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Units</term>
+
+                  <listitem>
+                    <para>N/A</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Interfaces</term>
+
+                  <listitem>
+                    <para>Script</para>
+                  </listitem>
+                </varlistentry>
+              </variablelist></entry>
+          </row>
+
+          <row>
             <entry><guilabel>DataFilters</guilabel></entry>
 
             <entry><para>Defines data selection filters to be applied to the
@@ -162,6 +221,68 @@
 
                   <listitem>
                     <para><guilabel>None</guilabel></para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Units</term>
+
+                  <listitem>
+                    <para>N/A</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Interfaces</term>
+
+                  <listitem>
+                    <para>Script</para>
+                  </listitem>
+                </varlistentry>
+              </variablelist></entry>
+          </row>
+
+          <row>
+            <entry><guilabel>DataFileStyle</guilabel></entry>
+
+            <entry><para>Selects the level of detail written to the
+            <guilabel>DataFile</guilabel> JSON output. Has no effect when
+            <guilabel>DataFile</guilabel> is unset.</para><variablelist>
+                <varlistentry>
+                  <term>Data Type</term>
+
+                  <listitem>
+                    <para>String</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Allowed Values</term>
+
+                  <listitem>
+                    <para><guilabel>Normal</guilabel> or
+                    <guilabel>Verbose</guilabel>. In <guilabel>Verbose</guilabel>
+                    mode each filter update additionally records
+                    <guilabel>CovarianceVNB</guilabel>,
+                    <guilabel>ProcessNoise</guilabel>,
+                    <guilabel>STM</guilabel>, and
+                    <guilabel>ScaledResidual</guilabel>.</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Access</term>
+
+                  <listitem>
+                    <para>Set</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Default Value</term>
+
+                  <listitem>
+                    <para><guilabel>Normal</guilabel></para>
                   </listitem>
                 </varlistentry>
 
@@ -1709,6 +1830,83 @@
           </tbody>
         </tgroup>
       </informaltable>
+    </refsection>
+
+    <refsection xml:id="ExtendedKalmanFilter_DataFile">
+      <title>Kalman Filter JSON Data File</title>
+
+      <para>Setting the <guilabel>DataFile</guilabel> field on an
+      <guilabel>ExtendedKalmanFilter</guilabel> resource enables a JSON output
+      file containing per-update analysis data. Unlike the MATLAB output, the
+      JSON output does not require GMAT to be connected to MATLAB, and the two
+      outputs are independent -- either, both, or neither may be enabled on a
+      given run.</para>
+
+      <para>The JSON file has the following top-level structure:</para>
+
+      <programlisting>{
+  "EstimationEpoch":       "...",
+  "InitialState":          [...],
+  "CartesianStateNames":   [...],
+  "KeplerianStateNames":   [...],
+  "FilterUpdates": [
+    { "Epoch": "...", "Type": "Initial|Time|Measurement|Predict",
+      "State": [...], "Covariance": [[...]],
+      "MeasurementNumber": N, "Residual": [...], "EditFlag": null|"..."
+    },
+    ...
+  ]
+}</programlisting>
+
+      <para>Each entry in <guilabel>FilterUpdates</guilabel> corresponds to one
+      filter time-update or measurement-update. The <guilabel>Type</guilabel>
+      field distinguishes the four kinds of update:
+      <guilabel>Initial</guilabel> (the a priori state at the start of the
+      run), <guilabel>Time</guilabel> (a time update with no measurement),
+      <guilabel>Measurement</guilabel> (a measurement update), and
+      <guilabel>Predict</guilabel> (a prediction-only update past the last
+      measurement). Measurement updates additionally carry the
+      <guilabel>MeasurementNumber</guilabel>, the pre-update
+      <guilabel>Residual</guilabel> vector, and an
+      <guilabel>EditFlag</guilabel> (null for accepted, otherwise a short
+      string identifying the rejection reason such as "SIG" for
+      sigma-edited).</para>
+
+      <para>When <guilabel>DataFileStyle</guilabel> is set to
+      <guilabel>Verbose</guilabel>, each <guilabel>FilterUpdates</guilabel>
+      entry additionally carries the following fields:</para>
+
+      <itemizedlist>
+        <listitem>
+          <para><guilabel>CovarianceVNB</guilabel> -- the position/velocity
+          covariance rotated into the VNB frame.</para>
+        </listitem>
+
+        <listitem>
+          <para><guilabel>ProcessNoise</guilabel> -- the process noise matrix
+          accumulated since the previous update.</para>
+        </listitem>
+
+        <listitem>
+          <para><guilabel>STM</guilabel> -- the state transition matrix.</para>
+        </listitem>
+
+        <listitem>
+          <para><guilabel>ScaledResidual</guilabel> -- the measurement
+          residual normalized by its expected sigma. Present only on
+          measurement updates.</para>
+        </listitem>
+      </itemizedlist>
+
+      <para>Companion Python plotting utilities for the JSON output ship in
+      <filename>application/utilities/python/navigation/</filename> alongside
+      the existing MATLAB-file plotters:
+      <filename>plot_covariance_json.py</filename>,
+      <filename>plot_raw_residuals_json.py</filename>,
+      <filename>plot_residual_ratios_json.py</filename>,
+      <filename>plot_solve_fors_json.py</filename>,
+      <filename>plot_cond_cov_json.py</filename>, and
+      <filename>filter_smoother_consistency_json.py</filename>.</para>
     </refsection>
 
     <refsection>

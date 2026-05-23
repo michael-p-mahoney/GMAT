@@ -237,6 +237,65 @@
           </row>
 
           <row>
+            <entry><guilabel>DataFileStyle</guilabel></entry>
+
+            <entry><para>Selects the level of detail written to the
+            <guilabel>DataFile</guilabel> JSON output. Has no effect when
+            <guilabel>DataFile</guilabel> is unset.</para><variablelist>
+                <varlistentry>
+                  <term>Data Type</term>
+
+                  <listitem>
+                    <para>String</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Allowed Values</term>
+
+                  <listitem>
+                    <para><guilabel>Normal</guilabel> or
+                    <guilabel>Verbose</guilabel>. In <guilabel>Verbose</guilabel>
+                    mode additional per-record fields are written; see the
+                    <guilabel>Remarks</guilabel> for details.</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Access</term>
+
+                  <listitem>
+                    <para>set</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Default Value</term>
+
+                  <listitem>
+                    <para><guilabel>Normal</guilabel></para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Units</term>
+
+                  <listitem>
+                    <para>N/A</para>
+                  </listitem>
+                </varlistentry>
+
+                <varlistentry>
+                  <term>Interfaces</term>
+
+                  <listitem>
+                    <para>script</para>
+                  </listitem>
+                </varlistentry>
+              </variablelist></entry>
+          </row>
+
+          <row>
             <entry><guilabel>EstimationEpoch</guilabel></entry>
 
             <entry><para>Estimation Epoch. This is the epoch associated with
