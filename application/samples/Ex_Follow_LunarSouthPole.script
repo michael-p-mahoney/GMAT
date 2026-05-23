@@ -1,0 +1,249 @@
+%
+%  Ex_Follow_LunarSouthPole
+%
+%  Demonstrates the Follow command with a "spacecraft" fixed to a point on
+%  the lunar south pole surface for 8 hours (28800 s).
+%
+%  The surface point is placed at 89 deg S latitude, 0 deg E longitude,
+%  on the Moon's surface (|r| = 1737.4 km in MoonFixed).  Because the
+%  Follow command freezes the state in MoonFixed, the spacecraft stays at
+%  a constant body-fixed position while the Moon rotates and moves in its
+%  orbit around Earth.
+%
+%  Window layout (all shifted down 0.04 to clear the macOS menu bar):
+%
+%    |<---------- 0.50 ---------->|<---------- 0.49 ----------->|
+%    +-----------------------------+-----------------------------+
+%    |                             |  OFI_MoonInertial (MJ2000) |
+%    |   OFI_MoonFixed3D           |  Top-right: 0.51,0.04      |
+%    |   (body-fixed frame)        |  Moon + surface point in   |
+%    |   Left: 0.0,0.04            |  inertial frame; Moon moves|
+%    |   South-pole camera view    +-----------------------------+
+%    |                             |  MoonGroundTrack (2D map)  |
+%    |                             |  Bottom-right: 0.51,0.52   |
+%    +-----------------------------+  Stationary dot at 89S,0E  |
+%                                  +-----------------------------+
+%
+%  Subscribers:
+%    OFI_MoonFixed3D   - Moon body-fixed frame; surface point appears
+%                        stationary, stars/background rotates.
+%    OFI_MoonInertial  - Moon MJ2000Eq inertial frame; Moon body rotates,
+%                        surface point traces a latitude circle.
+%    MoonGroundTrack   - 2D lunar surface map; dot stays fixed at 89S, 0E.
+%    ReportMoonFixed   - ASCII report (console verification).
+%
+%  General Mission Analysis Tool (GMAT) Script
+%  Created: 2026-04-10
+%
+
+%----------------------------------------
+%---------- Coordinate Systems
+%----------------------------------------
+
+% Moon-centred body-fixed frame (rotates with the Moon)
+Create CoordinateSystem MoonFixed;
+MoonFixed.Origin = Luna;
+MoonFixed.Axes   = BodyFixed;
+
+% Moon-centred inertial frame
+Create CoordinateSystem MoonInertial;
+MoonInertial.Origin = Luna;
+MoonInertial.Axes   = MJ2000Eq;
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+% Surface point at 89 deg S, 0 deg E on the Moon.
+% State is expressed in MoonFixed; GMAT converts internally to EarthMJ2000Eq.
+% Velocity is zero in MoonFixed (stationary on surface).
+% Placed 10 km above the Moon's surface (r = 1747.4 km) so the marker is
+% visible above the rendered lunar sphere (radius = 1737.4 km).
+Create Spacecraft LunarSurface;
+LunarSurface.DateFormat        = TAIModJulian;
+LunarSurface.Epoch             = '21545';
+LunarSurface.CoordinateSystem  = MoonFixed;
+LunarSurface.DisplayStateType  = Cartesian;
+LunarSurface.X  =   30.4958;
+LunarSurface.Y  =    0.0000;
+LunarSurface.Z  = -1747.1354;
+LunarSurface.VX =    0.0;
+LunarSurface.VY =    0.0;
+LunarSurface.VZ =    0.0;
+LunarSurface.ModelFile         = '/Users/michael.mahoney/Applications/GMAT-R2026a/data/graphics/models/Apollo Lunar Module.glb';
+LunarSurface.DryMass           = 1;
+LunarSurface.Cd                = 2.2;
+LunarSurface.Cr                = 1.8;
+LunarSurface.DragArea          = 1;
+LunarSurface.SRPArea           = 1;
+
+%----------------------------------------
+%---------- 3D View: Moon body-fixed frame (left panel)
+%
+% Camera sits 5000 km outside the Moon in the -Z / south-pole direction,
+% offset 800 km in X so the south polar region fills the view.
+% In this frame the Moon body is fixed and the background rotates.
+%----------------------------------------
+
+Create OpenFramesInterface OFI_MoonFixed3D;
+OFI_MoonFixed3D.SolverIterations = Current;
+OFI_MoonFixed3D.UpperLeft        = [ 0.0 0.04 ];
+OFI_MoonFixed3D.Size             = [ 0.50 0.95 ];
+OFI_MoonFixed3D.RelativeZOrder   = 200;
+OFI_MoonFixed3D.Maximized        = false;
+OFI_MoonFixed3D.Add              = {LunarSurface, Luna};
+OFI_MoonFixed3D.View             = {MoonFixed_SceneView, LunarSurface_BFView, Luna_BFView};
+OFI_MoonFixed3D.CoordinateSystem = MoonFixed;
+OFI_MoonFixed3D.DrawObject       = [ true true ];
+OFI_MoonFixed3D.DrawXYPlane      = [ false false ];
+OFI_MoonFixed3D.DrawLabel        = [ true true ];
+OFI_MoonFixed3D.DrawGrid         = [ false false ];
+OFI_MoonFixed3D.Axes             = On;
+OFI_MoonFixed3D.XYPlane          = Off;
+OFI_MoonFixed3D.EclipticPlane    = Off;
+OFI_MoonFixed3D.EnableStars      = On;
+OFI_MoonFixed3D.StarCount        = 40000;
+OFI_MoonFixed3D.ShowPlot         = true;
+
+% Main scene: south-pole perspective in body-fixed frame
+Create OpenFramesView MoonFixed_SceneView;
+MoonFixed_SceneView.ViewFrame           = CoordinateSystem;
+MoonFixed_SceneView.ViewTrajectory      = Off;
+MoonFixed_SceneView.InertialFrame       = Off;
+MoonFixed_SceneView.SetDefaultLocation  = On;
+MoonFixed_SceneView.SetCurrentLocation  = Off;
+MoonFixed_SceneView.DefaultEye          = [ 800 0 -5000 ];
+MoonFixed_SceneView.DefaultCenter       = [ 0 0 0 ];
+MoonFixed_SceneView.DefaultUp           = [ 1 0 0 ];
+MoonFixed_SceneView.FOVy                = 45;
+
+% View from the surface point itself
+Create OpenFramesView LunarSurface_BFView;
+LunarSurface_BFView.ViewFrame          = LunarSurface;
+LunarSurface_BFView.ViewTrajectory     = Off;
+LunarSurface_BFView.InertialFrame      = Off;
+LunarSurface_BFView.SetDefaultLocation = Off;
+LunarSurface_BFView.SetCurrentLocation = Off;
+LunarSurface_BFView.FOVy               = 45;
+
+% View from/of Luna body
+Create OpenFramesView Luna_BFView;
+Luna_BFView.ViewFrame          = Luna;
+Luna_BFView.ViewTrajectory     = Off;
+Luna_BFView.InertialFrame      = Off;
+Luna_BFView.SetDefaultLocation = Off;
+Luna_BFView.SetCurrentLocation = Off;
+Luna_BFView.FOVy               = 45;
+
+%----------------------------------------
+%---------- 3D View: Moon MJ2000Eq inertial frame (top-right panel)
+%
+% In this frame the Moon body rotates as the simulation advances.
+% The surface point traces a latitude circle near 89 S.
+% Camera is placed 5000 km from the Moon's centre in a slightly
+% off-axis position so both the Moon and the surface marker are visible.
+%----------------------------------------
+
+Create OpenFramesInterface OFI_MoonInertial;
+OFI_MoonInertial.SolverIterations = Current;
+OFI_MoonInertial.UpperLeft        = [ 0.51 0.04 ];
+OFI_MoonInertial.Size             = [ 0.49 0.47 ];
+OFI_MoonInertial.RelativeZOrder   = 190;
+OFI_MoonInertial.Maximized        = false;
+OFI_MoonInertial.Add              = {LunarSurface, Luna};
+OFI_MoonInertial.View             = {MoonInertial_SceneView, LunarSurface_InView, Luna_InView};
+OFI_MoonInertial.CoordinateSystem = MoonInertial;
+OFI_MoonInertial.DrawObject       = [ true true ];
+OFI_MoonInertial.DrawXYPlane      = [ false false ];
+OFI_MoonInertial.DrawLabel        = [ true true ];
+OFI_MoonInertial.DrawGrid         = [ false false ];
+OFI_MoonInertial.Axes             = On;
+OFI_MoonInertial.XYPlane          = Off;
+OFI_MoonInertial.EclipticPlane    = Off;
+OFI_MoonInertial.EnableStars      = On;
+OFI_MoonInertial.StarCount        = 40000;
+OFI_MoonInertial.ShowPlot         = true;
+
+% Main scene: wide view of Moon in inertial frame
+Create OpenFramesView MoonInertial_SceneView;
+MoonInertial_SceneView.ViewFrame           = CoordinateSystem;
+MoonInertial_SceneView.ViewTrajectory      = Off;
+MoonInertial_SceneView.InertialFrame       = Off;
+MoonInertial_SceneView.SetDefaultLocation  = On;
+MoonInertial_SceneView.SetCurrentLocation  = Off;
+MoonInertial_SceneView.DefaultEye          = [ 2000 2000 -4000 ];
+MoonInertial_SceneView.DefaultCenter       = [ 0 0 0 ];
+MoonInertial_SceneView.DefaultUp           = [ 0 1 0 ];
+MoonInertial_SceneView.FOVy                = 45;
+
+% View from the surface point in inertial frame
+Create OpenFramesView LunarSurface_InView;
+LunarSurface_InView.ViewFrame          = LunarSurface;
+LunarSurface_InView.ViewTrajectory     = Off;
+LunarSurface_InView.InertialFrame      = Off;
+LunarSurface_InView.SetDefaultLocation = Off;
+LunarSurface_InView.SetCurrentLocation = Off;
+LunarSurface_InView.FOVy               = 45;
+
+% View from/of Luna body in inertial frame
+Create OpenFramesView Luna_InView;
+Luna_InView.ViewFrame          = Luna;
+Luna_InView.ViewTrajectory     = Off;
+Luna_InView.InertialFrame      = Off;
+Luna_InView.SetDefaultLocation = Off;
+Luna_InView.SetCurrentLocation = Off;
+Luna_InView.FOVy               = 45;
+
+%----------------------------------------
+%---------- 2D Ground Track: Moon surface (bottom-right panel)
+%
+% A stationary point on the surface appears as a fixed dot on the map.
+% The texture is the Hermes/Celestia lunar map included with GMAT.
+%----------------------------------------
+
+Create GroundTrackPlot MoonGroundTrack;
+MoonGroundTrack.SolverIterations     = Current;
+MoonGroundTrack.UpperLeft            = [ 0.51 0.52 ];
+MoonGroundTrack.Size                 = [ 0.49 0.47 ];
+MoonGroundTrack.RelativeZOrder       = 180;
+MoonGroundTrack.Maximized            = false;
+MoonGroundTrack.Add                  = {LunarSurface};
+MoonGroundTrack.DataCollectFrequency = 1;
+MoonGroundTrack.UpdatePlotFrequency  = 50;
+MoonGroundTrack.NumPointsToRedraw    = 0;
+MoonGroundTrack.ShowPlot             = true;
+MoonGroundTrack.CentralBody          = Luna;
+MoonGroundTrack.TextureMap           = '../data/graphics/texture/Moon_HermesCelestiaMotherlode.jpg';
+
+%----------------------------------------
+%---------- Report File (console verification)
+%
+% Columns:
+%   Epoch (TAI MJD)
+%   MoonFixed X/Y/Z  -- should remain constant (~30.32, 0, -1737.14 km)
+%   EarthMJ2000Eq X/Y/Z -- drifts as Moon moves in its orbit
+%----------------------------------------
+
+Create ReportFile ReportMoonFixed;
+ReportMoonFixed.SolverIterations = Current;
+ReportMoonFixed.Filename         = 'Follow_LunarSouthPole.txt';
+ReportMoonFixed.Add              = {LunarSurface.TAIModJulian, LunarSurface.MoonFixed.X, LunarSurface.MoonFixed.Y, LunarSurface.MoonFixed.Z, LunarSurface.EarthMJ2000Eq.X, LunarSurface.EarthMJ2000Eq.Y, LunarSurface.EarthMJ2000Eq.Z};
+ReportMoonFixed.WriteHeaders     = true;
+ReportMoonFixed.ColumnWidth      = 25;
+ReportMoonFixed.WriteReport      = true;
+
+%----------------------------------------
+%---------- Mission Sequence
+%----------------------------------------
+
+BeginMissionSequence;
+
+% Snapshot before Follow
+Report ReportMoonFixed LunarSurface.TAIModJulian LunarSurface.MoonFixed.X LunarSurface.MoonFixed.Y LunarSurface.MoonFixed.Z LunarSurface.EarthMJ2000Eq.X LunarSurface.EarthMJ2000Eq.Y LunarSurface.EarthMJ2000Eq.Z;
+
+% Hold LunarSurface at a fixed point in MoonFixed for 8 hours (28800 s).
+% The command steps in 60 s increments by default.
+Follow MoonFixed(LunarSurface) {LunarSurface.ElapsedSecs = 28800};
+
+% Snapshot after Follow
+Report ReportMoonFixed LunarSurface.TAIModJulian LunarSurface.MoonFixed.X LunarSurface.MoonFixed.Y LunarSurface.MoonFixed.Z LunarSurface.EarthMJ2000Eq.X LunarSurface.EarthMJ2000Eq.Y LunarSurface.EarthMJ2000Eq.Z;

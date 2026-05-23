@@ -118,6 +118,7 @@ OPTION(PLUGIN_EVENTLOCATOR "EventLocator Plugin" ON)
 OPTION(PLUGIN_EXTERNALFORCEMODEL "ExternalForceModel Plugin" ON)
 OPTION(PLUGIN_EXTRAPROPAGATORS "ExtraPropagators Plugin" ON)
 OPTION(PLUGIN_FMINCONOPTIMIZER "FminconOptimizer Plugin" OFF)
+OPTION(PLUGIN_FOLLOWCOMMAND "FollowCommand Plugin" ON)
 OPTION(PLUGIN_FORMATION "Formation Plugin" ON)
 OPTION(PLUGIN_GEOMETRICMEASUREMENT "GeometricMeasurement Plugin" OFF)
 OPTION(PLUGIN_GMATFUNCTION "GmatFunction Plugin" ON)
@@ -236,6 +237,15 @@ endif()
 # FminconOptimizer Plugin
 if (PLUGIN_FMINCONOPTIMIZER)
   SET(PLUGINDIR "FminconOptimizerPlugin/src/base")
+  ADD_SUBDIRECTORY(${PLUGINDIR})
+  GET_DIRECTORY_PROPERTY(tmp DIRECTORY ${PLUGINDIR} DEFINITION TargetName)
+  SET(PluginTargets ${PluginTargets} ${tmp})
+endif()
+
+# ====================================================================
+# FollowCommand Plugin
+if (PLUGIN_FOLLOWCOMMAND)
+  SET(PLUGINDIR "FollowCommandPlugin/src/base")
   ADD_SUBDIRECTORY(${PLUGINDIR})
   GET_DIRECTORY_PROPERTY(tmp DIRECTORY ${PLUGINDIR} DEFINITION TargetName)
   SET(PluginTargets ${PluginTargets} ${tmp})

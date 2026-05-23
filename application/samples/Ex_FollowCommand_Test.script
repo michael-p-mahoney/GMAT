@@ -1,0 +1,132 @@
+%
+%  Ex_FollowCommand_Test
+%
+%  Script demonstrating the Follow command, which keeps one or more spacecraft
+%  at a fixed state in a specified coordinate system while time advances.
+%
+%  Three test cases are run sequentially:
+%
+%  Test 1 - EarthMJ2000Eq freeze (inertial)
+%    Sat1 is held at a fixed inertial position for 1 hour.
+%    Because EarthMJ2000Eq is inertial the position should be identical
+%    before and after (velocity also unchanged).
+%
+%  Test 2 - EarthFixed freeze (body-fixed)
+%    Sat2 is held at a fixed position above Earth's surface for ~1 orbit.
+%    Because EarthFixed rotates with Earth, the inertial position will change
+%    each step even though the body-fixed position stays constant.
+%
+%  Test 3 - Multi-spacecraft freeze
+%    Sat1 and Sat2 are both frozen in EarthMJ2000Eq for 30 minutes.
+%
+%  General Mission Analysis Tool (GMAT) Script
+%  Created: 2026-04-10
+%
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft Sat1;
+Sat1.DateFormat        = TAIModJulian;
+Sat1.Epoch             = '21545';
+Sat1.CoordinateSystem  = EarthMJ2000Eq;
+Sat1.DisplayStateType  = Cartesian;
+Sat1.X  =  7000;
+Sat1.Y  =     0;
+Sat1.Z  =     0;
+Sat1.VX =     0;
+Sat1.VY =  7.546;
+Sat1.VZ =     0;
+Sat1.DryMass           = 850;
+Sat1.Cd                = 2.2;
+Sat1.Cr                = 1.8;
+Sat1.DragArea          = 15;
+Sat1.SRPArea           = 1;
+
+Create Spacecraft Sat2;
+Sat2.DateFormat        = TAIModJulian;
+Sat2.Epoch             = '21545';
+Sat2.CoordinateSystem  = EarthFixed;
+Sat2.DisplayStateType  = Cartesian;
+Sat2.X  =  6400;
+Sat2.Y  =     0;
+Sat2.Z  =   500;
+Sat2.VX =     0;
+Sat2.VY =     0;
+Sat2.VZ =     0;
+Sat2.DryMass           = 850;
+Sat2.Cd                = 2.2;
+Sat2.Cr                = 1.8;
+Sat2.DragArea          = 15;
+Sat2.SRPArea           = 1;
+
+%----------------------------------------
+%---------- Subscribers
+%----------------------------------------
+
+Create ReportFile Report1;
+Report1.SolverIterations = Current;
+Report1.Filename         = 'Follow_Test1_InertialFreeze.txt';
+Report1.Add              = {Sat1.TAIModJulian, Sat1.X, Sat1.Y, Sat1.Z, Sat1.VX, Sat1.VY, Sat1.VZ};
+Report1.WriteHeaders     = true;
+Report1.ColumnWidth      = 23;
+Report1.WriteReport      = true;
+
+Create ReportFile Report2;
+Report2.SolverIterations = Current;
+Report2.Filename         = 'Follow_Test2_BodyFixedFreeze.txt';
+Report2.Add              = {Sat2.TAIModJulian, Sat2.EarthFixed.X, Sat2.EarthFixed.Y, Sat2.EarthFixed.Z, Sat2.EarthMJ2000Eq.X, Sat2.EarthMJ2000Eq.Y, Sat2.EarthMJ2000Eq.Z};
+Report2.WriteHeaders     = true;
+Report2.ColumnWidth      = 23;
+Report2.WriteReport      = true;
+
+Create ReportFile Report3;
+Report3.SolverIterations = Current;
+Report3.Filename         = 'Follow_Test3_MultiSat.txt';
+Report3.Add              = {Sat1.TAIModJulian, Sat1.X, Sat1.Y, Sat1.Z, Sat2.X, Sat2.Y, Sat2.Z};
+Report3.WriteHeaders     = true;
+Report3.ColumnWidth      = 23;
+Report3.WriteReport      = true;
+
+%----------------------------------------
+%---------- Mission Sequence
+%----------------------------------------
+
+BeginMissionSequence;
+
+%-----------------------------------------------------
+% Test 1: Freeze Sat1 in EarthMJ2000Eq for 1 hour.
+% Expected: X/Y/Z and VX/VY/VZ identical before/after
+% because an inertial frame does not rotate.
+%-----------------------------------------------------
+
+Report Report1 Sat1.TAIModJulian Sat1.X Sat1.Y Sat1.Z Sat1.VX Sat1.VY Sat1.VZ;
+
+Follow EarthMJ2000Eq(Sat1) {Sat1.ElapsedSecs = 3600};
+
+Report Report1 Sat1.TAIModJulian Sat1.X Sat1.Y Sat1.Z Sat1.VX Sat1.VY Sat1.VZ;
+
+%-----------------------------------------------------
+% Test 2: Freeze Sat2 in EarthFixed for ~1 orbit (5925 s).
+% Expected: EarthFixed.X/Y/Z constant throughout;
+% EarthMJ2000Eq.X/Y/Z drifts as Earth rotates.
+%-----------------------------------------------------
+
+Report Report2 Sat2.TAIModJulian Sat2.EarthFixed.X Sat2.EarthFixed.Y Sat2.EarthFixed.Z Sat2.EarthMJ2000Eq.X Sat2.EarthMJ2000Eq.Y Sat2.EarthMJ2000Eq.Z;
+
+Follow EarthFixed(Sat2) {Sat2.ElapsedSecs = 5925};
+
+Report Report2 Sat2.TAIModJulian Sat2.EarthFixed.X Sat2.EarthFixed.Y Sat2.EarthFixed.Z Sat2.EarthMJ2000Eq.X Sat2.EarthMJ2000Eq.Y Sat2.EarthMJ2000Eq.Z;
+
+%-----------------------------------------------------
+% Test 3: Freeze Sat1 and Sat2 simultaneously in
+% EarthMJ2000Eq for 30 minutes.
+% Expected: both spacecraft states unchanged.
+%-----------------------------------------------------
+
+Report Report3 Sat1.TAIModJulian Sat1.X Sat1.Y Sat1.Z Sat2.X Sat2.Y Sat2.Z;
+
+Follow EarthMJ2000Eq(Sat1, Sat2) {Sat1.ElapsedSecs = 1800};
+
+Report Report3 Sat1.TAIModJulian Sat1.X Sat1.Y Sat1.Z Sat2.X Sat2.Y Sat2.Z;
