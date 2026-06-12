@@ -1,2 +1,3 @@
 /lib/
-/doc/
+/doc/*
+!/doc/UKF_Spike1.md

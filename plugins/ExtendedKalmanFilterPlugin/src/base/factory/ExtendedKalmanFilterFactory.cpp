@@ -35,6 +35,7 @@
 
 // Here are the supported leaf classes
 #include "ExtendedKalmanFilter.hpp"
+#include "UnscentedKalmanFilter.hpp"
 
 
 //---------------------------------
@@ -101,6 +102,8 @@ Solver* ExtendedKalmanFilterFactory::CreateSolver(const std::string &ofType,
 
    if (ofType == "ExtendedKalmanFilter")
       return new ExtendedKalmanFilter(withName);
+   if (ofType == "UnscentedKalmanFilter")
+      return new UnscentedKalmanFilter(withName);
 
    // Here's a list of other potential estimators:
    //if (ofType == "BatchLeastSquares")
@@ -148,6 +151,7 @@ ExtendedKalmanFilterFactory::ExtendedKalmanFilterFactory() :
    {
 
       creatables.push_back("ExtendedKalmanFilter");
+      creatables.push_back("UnscentedKalmanFilter");
 
       //creatables.push_back("BatchLeastSquares");
       //creatables.push_back("SequentialLeastSquares");
@@ -200,6 +204,7 @@ ExtendedKalmanFilterFactory::ExtendedKalmanFilterFactory(const ExtendedKalmanFil
    {
 
       creatables.push_back("ExtendedKalmanFilter");
+      creatables.push_back("UnscentedKalmanFilter");
 
       //creatables.push_back("BatchLeastSquares");
       //creatables.push_back("SequentialLeastSquares");

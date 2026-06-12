@@ -45,6 +45,7 @@ SET(PLUGIN_DIRS command EKF estimatedparam factory include noise plugin smoother
 SET(PLUGIN_SRCS
     command/RunSmoother.cpp
     EKF/ExtendedKalmanFilter.cpp
+    EKF/UnscentedKalmanFilter.cpp
     EKF/SeqEstimator.cpp
     estimatedparam/EstimatedParameter.cpp
     estimatedparam/EstimatedParameterModel.cpp
