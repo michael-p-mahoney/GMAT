@@ -35,8 +35,10 @@
 
 #include "kalman_defs.hpp"
 #include "SeqEstimator.hpp"
+#include "GmatState.hpp"   // ukfPriorState
+#include "GmatTime.hpp"    // ukfPriorEpochGT
 
-class PropSetup;   // Spike 1: dedicated sigma-point propagator
+class PropSetup;   // dedicated sigma-point propagator
 
 
 /**
@@ -89,6 +91,10 @@ protected:
    Rmatrix                 sqrtP;
    Rmatrix                 sqrtPupdate;
 
+   /// Unscented innovation covariance Pyy, carried from the gain step to the
+   /// covariance update (P = pBar - K Pyy K').
+   Rmatrix                 ukfPyy;
+
    /// UKF sigma-point spread parameter (small, e.g. 1e-3)
    Real                    alpha;
    /// UKF prior-knowledge parameter (2.0 is optimal for Gaussian)
@@ -114,16 +120,23 @@ protected:
 
    virtual void            UpdateCov();
 
-   // ---- Spike 1: sigma-point propagation experiment ----
-   /// Generate the 2n+1 sigma points from (state, sqrtP) into the columns of sigmaPts
+   // ---- Unscented transform machinery ----
+   /// Generate the 2n+1 sigma points from (mean, sqrtCov) into sigmaPts
    void                    GenerateSigmaPoints(const Rvector &mean,
                                                const Rmatrix &sqrtCov,
                                                std::vector<Rvector> &sigmaPts) const;
-   /// Re-seed and propagate each sigma point from prevUpdateEpochGT to
-   /// currentEpochGT through the held PropSetup, returning the propagated points.
-   /// Spike deliverable: validates the re-propagation mechanism and compares the
-   /// recombined mean against the reference (STM) prediction.
-   void                    PropagateSigmaPoints(Real dt);
+   /// Re-seed and propagate each seed sigma point from startEpoch forward by dt
+   /// through sigmaProp, returning the propagated estimation states in propPts.
+   void                    PropagateSigmaPoints(const std::vector<Rvector> &seeds,
+                                                const GmatTime &startEpoch, Real dt,
+                                                std::vector<Rvector> &propPts);
+   /// Unscented time update (predict): propagate the prior distribution from
+   /// ukfPriorEpochGT to currentEpochGT, producing the predicted mean (written
+   /// into the objects), pBar, and sqrtP.  Replaces the EKF STM covariance map.
+   void                    UnscentedTimeUpdate();
+   /// Refresh sqrtP as the lower-triangular Cholesky factor of a covariance P
+   /// (P = sqrtP * sqrtP'), warning if P is not positive definite.
+   void                    RefactorCovariance(const Rmatrix &P);
    /// Build sigmaProp: a dedicated, fully-initialized PropSetup wired to the same
    /// spacecraft esm maps to, so sigma points can be re-seeded and stepped.  The
    /// base Estimator's propagators[] are configured but never Initialize()d for
@@ -135,11 +148,16 @@ protected:
    RealArray               wc;   ///< covariance weights
    Real                    lambda;
 
-   /// Spike 1: number of time updates on which the experiment has been run
-   Integer                 spikeCount;
-   /// Spike 1: dedicated, initialized propagator used to step sigma points
-   /// (NULL outside the spike; owned by this instance)
+   /// Dedicated, initialized propagator used to step sigma points (owned)
    PropSetup              *sigmaProp;
+
+   /// UKF prior distribution carried between updates: the filter retains its own
+   /// (state, epoch) because by the time TimeUpdate() runs the command has already
+   /// advanced the spacecraft and reset prevUpdateEpochGT.  sqrtP (inherited) holds
+   /// the matching prior square-root covariance.
+   GmatState               ukfPriorState;
+   GmatTime                ukfPriorEpochGT;
+   bool                    ukfHasPrior;
 
 private:
    void                    SetupMeas();

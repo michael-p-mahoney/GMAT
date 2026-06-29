@@ -39,10 +39,11 @@
 #include "StringUtil.hpp"
 #include "UtilityException.hpp"
 #include "GmatConstants.hpp"     // GmatTimeConstants (Spike 1)
-#include "PropSetup.hpp"         // PropSetup (Spike 1)
-#include "ODEModel.hpp"          // ODEModel re-seed API (Spike 1)
-#include "Propagator.hpp"        // Propagator::Step (Spike 1)
-#include "PropagationStateManager.hpp" // sigma-point PropSetup setup (Spike 1)
+#include "PropSetup.hpp"         // dedicated sigma-point propagator
+#include "ODEModel.hpp"          // ODEModel re-seed API
+#include "Propagator.hpp"        // Propagator::Step
+#include "PropagationStateManager.hpp" // sigma-point PropSetup setup
+#include "SpaceObject.hpp"       // SetEpochGT when seeding sigma points
 #include <cmath>
 #include <limits>
 
@@ -51,11 +52,8 @@
 //#define DEBUG_JOSEPH
 //#define DEBUG_ESTIMATION_COVARIACE_PROP
 
-// Spike 1: enable to run the sigma-point re-propagation experiment inside the
-// time update.  Off by default so UnscentedKalmanFilter runs as a clean EKF
-// baseline; turning this on perturbs and restores the live propagator while it
-// logs the recombined sigma-point mean for comparison.
-#define DEBUG_UKF_SPIKE
+// Enable verbose per-step logging of the unscented time update.
+//#define DEBUG_UKF
 
 //------------------------------------------------------------------------------
 // UnscentedKalmanFilter(const std::string name)
@@ -72,8 +70,8 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const std::string name) :
    beta          (2.0),
    kappa         (0.0),
    lambda        (0.0),
-   spikeCount    (0),
    sigmaProp     (NULL),
+   ukfHasPrior   (false),
    calculatedMeas(0),
    currentObs(0)
 {
@@ -115,8 +113,8 @@ UnscentedKalmanFilter::UnscentedKalmanFilter(const UnscentedKalmanFilter & ukf) 
    beta          (ukf.beta),
    kappa         (ukf.kappa),
    lambda        (ukf.lambda),
-   spikeCount    (0),
    sigmaProp     (NULL),
+   ukfHasPrior   (false),
    calculatedMeas(0),
    currentObs(0)
 {
@@ -312,15 +310,19 @@ void UnscentedKalmanFilter::CompleteInitialization()
       wc[i] = wm[i];
    }
 
-   spikeCount = 0;
-
-#ifdef DEBUG_UKF_SPIKE
-   MessageInterface::ShowMessage("[UKF Spike] CompleteInitialization: n=%d, "
-      "alpha=%g, beta=%g, kappa=%g, lambda=%g, %d sigma points\n",
-      stateSize, alpha, beta, kappa, lambda, numSigma);
-
    // Build the dedicated, initialized propagator used to step sigma points.
    BuildSigmaPropagator();
+
+   // Seed the UKF prior distribution: the a priori estimation state at the
+   // a priori epoch, paired with the apriori sqrtP set above.
+   ukfPriorState   = esm.GetEstimationState();
+   ukfPriorEpochGT = currentEpochGT;
+   ukfHasPrior     = true;
+
+#ifdef DEBUG_UKF
+   MessageInterface::ShowMessage("[UKF] CompleteInitialization: n=%d, alpha=%g, "
+      "beta=%g, kappa=%g, lambda=%g, %d sigma points\n",
+      stateSize, alpha, beta, kappa, lambda, numSigma);
 #endif
 }
 
@@ -510,232 +512,136 @@ void UnscentedKalmanFilter::FilterUpdate()
 // void TimeUpdate()
 //------------------------------------------------------------------------------
 /**
- * Performs the time update of the state error covariance
+ * Performs the unscented time update (predict).
  *
- * This method uses Cholesky factorization for covariance
- * This is based on section 5.7 of Brown and Hwang 4e
+ * Unlike the EKF (which maps the covariance forward with the accumulated STM),
+ * the UKF propagates the prior distribution through the real nonlinear dynamics
+ * as a set of sigma points and recombines them.  All the work is delegated to
+ * UnscentedTimeUpdate(); this override exists so the EKF STM covariance map is
+ * never used for a UnscentedKalmanFilter.
  */
  //------------------------------------------------------------------------------
 void UnscentedKalmanFilter::TimeUpdate()
 {
 #ifdef DEBUG_ESTIMATION
-   MessageInterface::ShowMessage("Performing time update\n");
+   MessageInterface::ShowMessage("Performing unscented time update\n");
 #endif
 
-#ifdef DEBUG_UKF_SPIKE
-   // ---- SPIKE 1 EXPERIMENT ----------------------------------------------
-   // Generate sigma points about the current reference state, re-seed and
-   // propagate each one forward by a representative test interval, recombine the
-   // weighted mean, and restore the reference so the live filter is unperturbed.
-   // Run only on the first few time updates to keep the log readable; uses a
-   // fixed dt because the goal is to validate the re-propagation mechanism, not
-   // to drive the covariance (the EKF STM update below still owns the filter).
-   {
-      const Integer spikeMaxRuns = 3;
-      const Real    spikeTestDt  = 60.0;   // seconds
-      if (spikeCount < spikeMaxRuns)
-      {
-         MessageInterface::ShowMessage(
-            "\n[UKF Spike] === experiment %d of %d at epoch %s ===\n",
-            spikeCount + 1, spikeMaxRuns, currentEpochGT.ToString().c_str());
-         PropagateSigmaPoints(spikeTestDt);
-         ++spikeCount;
-      }
-   }
-   // ---- END SPIKE 1 EXPERIMENT ------------------------------------------
-#endif
+   UnscentedTimeUpdate();
+}
 
-#ifdef DEBUG_ESTIMATION_COVARIACE_PROP
-   MessageInterface::ShowMessage("Q = \n");
-   for (UnsignedInt i = 0; i < stateSize; ++i)
-   {
-      for (UnsignedInt j = 0; j < stateSize; ++j)
-         MessageInterface::ShowMessage("   %.12le", Q(i, j));
-      MessageInterface::ShowMessage("\n");
-   }
-   MessageInterface::ShowMessage("\n");
-#endif
 
-   /// Calculate conversion derivative matrixes
-   // Calculate conversion derivative matrix [dX/dS] from Cartesian to Solve-for state
+//------------------------------------------------------------------------------
+// void UnscentedTimeUpdate()
+//------------------------------------------------------------------------------
+/**
+ * Unscented transform predict step.
+ *
+ * Propagates the prior distribution (ukfPriorState, sqrtP at ukfPriorEpochGT)
+ * forward to currentEpochGT: generates 2n+1 sigma points, re-seeds and steps
+ * each through sigmaProp, then recombines the weighted mean (xbar) and
+ * covariance (pBar = sum wc_i (Xi-xbar)(Xi-xbar)' + Q_S).  The predicted mean is
+ * written onto the estimation objects, and sqrtP is refreshed by Cholesky-
+ * factoring pBar (v1 uses the plain UT; the square-root cholupdate form is a
+ * follow-on).  Process noise Q is converted to the solve-for state space (Q_S)
+ * the same way the EKF does, so it is added consistently with the sigma points,
+ * which live in the estimation (solve-for) state space.
+ */
+//------------------------------------------------------------------------------
+void UnscentedKalmanFilter::UnscentedTimeUpdate()
+{
+   const UnsignedInt n = stateSize;
+
+   // Process noise in the solve-for state space (same conversion the EKF uses).
    cart2SolvMatrix = esm.CartToSolveForStateConversionDerivativeMatrix();
-   // Calculate conversion derivative matrix [dS/dK] from solve-for state to Keplerian
    solv2KeplMatrix = esm.SolveForStateToKeplConversionDerivativeMatrix();
-
-   Rmatrix dX_dS = cart2SolvMatrixPrev;
    Rmatrix dS_dX = cart2SolvMatrix.Inverse();
+   Rmatrix Q_S   = dS_dX * Q * dS_dX.Transpose();
 
-   Rmatrix Q_S = dS_dX * Q * dS_dX.Transpose();
+   Real dt = (currentEpochGT - ukfPriorEpochGT).GetTimeInSec();
 
+   // Command reference mean: the RunEstimator command has already propagated the
+   // objects to currentEpoch with the full integrator (this is the EKF's mean).
+   // Capture it now -- it is the predicted MEAN.  The sigma points (via the
+   // separate sigmaProp) are used ONLY for the covariance spread; small dynamics
+   // inconsistencies between sigmaProp and the command then appear as common-mode
+   // deviations that cancel, instead of biasing the mean and diverging the filter.
+   GmatState cmdMean = esm.GetEstimationState();
 
-#ifdef DEBUG_ESTIMATION_COVARIACE_PROP
-   MessageInterface::ShowMessage("dS_dX = \n");
-   for (UnsignedInt i = 0; i < stateSize; ++i)
+   // No time advance (e.g. duplicate epoch): covariance only picks up process
+   // noise, the mean is unchanged.
+   if (!ukfHasPrior || GmatMathUtil::Abs(dt) < 1e-9 || sigmaProp == NULL)
    {
-      for (UnsignedInt j = 0; j < stateSize; ++j)
-         MessageInterface::ShowMessage("   %.12le", dS_dX(i, j));
-      MessageInterface::ShowMessage("\n");
-   }
-   MessageInterface::ShowMessage("\n");
-   MessageInterface::ShowMessage("dX_dS = \n");
-   for (UnsignedInt i = 0; i < 6; ++i)
-   {
-      for (UnsignedInt j = 0; j < 6; ++j)
-         MessageInterface::ShowMessage("   %.12le", dX_dS(i, j));
-      MessageInterface::ShowMessage("\n");
-   }
-   MessageInterface::ShowMessage("\n");
-   MessageInterface::ShowMessage("stm = \n");
-   for (UnsignedInt i = 0; i < 6; ++i)
-   {
-      for (UnsignedInt j = 0; j < 6; ++j)
-         MessageInterface::ShowMessage("   %.12le", (*stm)(i, j));
-      MessageInterface::ShowMessage("\n");
-   }
-   MessageInterface::ShowMessage("\n");
-   MessageInterface::ShowMessage("Q_s = \n");
-   for (UnsignedInt i = 0; i < stateSize; ++i)
-   {
-      for (UnsignedInt j = 0; j < stateSize; ++j)
-         MessageInterface::ShowMessage("   %.12le", Q_S(i, j));
-      MessageInterface::ShowMessage("\n");
-   }
-   MessageInterface::ShowMessage("\n");
-#endif
-
-   Rmatrix stm_S = dS_dX * (*stm) * dX_dS;
-
-   // Update offset from reference trajectory
-   if (esm.HasStateOffset())
-   {
-      GmatState *offsetState = esm.GetStateOffset();
-      Rvector xOffset(stateSize);
-      xOffset.Set(offsetState->GetState(), stateSize);
-
-      xOffset = (*stm) * xOffset;
-
-      for (UnsignedInt i = 0; i < stateSize; ++i)
-         (*offsetState)[i] = xOffset[i];
+      pBar = sqrtP * sqrtP.Transpose() + Q_S;
+      Symmetrize(pBar);
+      RefactorCovariance(pBar);
+      ukfPriorState   = cmdMean;
+      ukfPriorEpochGT = currentEpochGT;
+      ukfHasPrior     = true;
+      return;
    }
 
-   // Form perform thinQR decomposition to calculate pBar
+   // 1. Sigma points about the prior mean using the prior sqrtP.
+   Rvector priorMean(n);
+   for (UnsignedInt i = 0; i < n; ++i)
+      priorMean(i) = ukfPriorState[i];
 
-   Rmatrix sqrtQ_T(stateSize, stateSize);
+   std::vector<Rvector> sigmaPts;
+   GenerateSigmaPoints(priorMean, sqrtP, sigmaPts);
 
-   bool hasZeroDiag = false;
-   for (UnsignedInt ii = 0U; ii < stateSize; ii++)
+   // 2. Propagate every sigma point from the prior epoch forward by dt.
+   std::vector<Rvector> propPts;
+   PropagateSigmaPoints(sigmaPts, ukfPriorEpochGT, dt, propPts);
+
+   // 3. Recombine: weighted mean of the propagated sigma points.
+   Rvector xbar(n);
+   for (UnsignedInt i = 0; i < n; ++i)
+      xbar(i) = 0.0;
+   for (UnsignedInt s = 0; s < propPts.size(); ++s)
+      for (UnsignedInt i = 0; i < n; ++i)
+         xbar(i) += wm[s] * propPts[s](i);
+
+   // 4. Predicted covariance: sum_i wc_i (Xi - xbar)(Xi - xbar)' + Q_S.
+   pBar.SetSize(n, n);
+   for (UnsignedInt i = 0; i < n; ++i)
+      for (UnsignedInt j = 0; j < n; ++j)
+         pBar(i, j) = Q_S(i, j);
+   for (UnsignedInt s = 0; s < propPts.size(); ++s)
    {
-      if (Q_S(ii, ii) == 0U)
-      {
-         hasZeroDiag = true;
-         break;
-      }
+      Rvector d = propPts[s] - xbar;
+      for (UnsignedInt i = 0; i < n; ++i)
+         for (UnsignedInt j = 0; j < n; ++j)
+            pBar(i, j) += wc[s] * d(i) * d(j);
    }
-
-   if (!hasZeroDiag)
-   {
-      try
-      {
-         cf.Factor(Q_S, sqrtQ_T);
-      }
-      catch (UtilityException e)
-      {
-         throw EstimatorException("The process noise matrix is not positive definite!");
-      }
-   }
-   else
-   {
-      // Remove all zero rows/columns first
-      IntegerArray removedIndexes;
-      IntegerArray auxVector;
-      Integer numRemoved;
-      Rmatrix reducedQ_S = MatrixFactorization::CompressNormalMatrix(Q_S,
-         removedIndexes, auxVector, numRemoved);
-
-      Rmatrix reducedSqrtQ_T(stateSize - numRemoved, stateSize - numRemoved);
-      try
-      {
-         cf.Factor(reducedQ_S, reducedSqrtQ_T);
-      }
-      catch (UtilityException e)
-      {
-         throw EstimatorException("The process noise matrix is not positive definite!");
-      }
-
-      sqrtQ_T = MatrixFactorization::ExpandNormalMatrixInverse(reducedSqrtQ_T,
-         auxVector, numRemoved);
-   }
-
-   Rmatrix stmP = stm_S * sqrtP;
-   Rmatrix sqrtQ = sqrtQ_T.Transpose();
-
-   #ifdef DEBUG_ESTIMATION_COVARIACE_PROP
-      MessageInterface::ShowMessage("stmP = \n");
-      for (UnsignedInt i = 0; i < stateSize; ++i)
-      {
-         for (UnsignedInt j = 0; j < stateSize; ++j)
-         {
-            MessageInterface::ShowMessage("  %.12le", stmP(i, j));
-         }
-         MessageInterface::ShowMessage("\n");
-      }
-      MessageInterface::ShowMessage("sqrtP = \n");
-      for (UnsignedInt i = 0; i < stateSize; ++i)
-      {
-         for (UnsignedInt j = 0; j < stateSize; ++j)
-         {
-            MessageInterface::ShowMessage("  %.12le", sqrtP(i, j));
-         }
-         MessageInterface::ShowMessage("\n");
-      }
-      MessageInterface::ShowMessage("sqrtQ = \n");
-      for (UnsignedInt i = 0; i < 6; ++i)
-      {
-         for (UnsignedInt j = 0; j < 6; ++j)
-         {
-            MessageInterface::ShowMessage("  %.12le", sqrtQ(i, j));
-         }
-         MessageInterface::ShowMessage("\n");
-      }
-#endif
-   sqrtP = thinQR(stmP, sqrtQ);
-
-   #ifdef DEBUG_ESTIMATION
-      MessageInterface::ShowMessage("sqrtP = \n");
-      for (UnsignedInt i = 0; i < stateSize; ++i)
-      {
-         for (UnsignedInt j = 0; j < stateSize; ++j)
-         {
-            MessageInterface::ShowMessage("  %.12le", sqrtP(i,j));
-         }
-         MessageInterface::ShowMessage("\n");
-      }
-   #endif
-
-   // Warn if covariance is not positive definite
-   for (UnsignedInt ii = 0U; ii < stateSize; ii++)
-   {
-      if (GmatMathUtil::Abs(sqrtP(ii, ii)) < 1e-16)
-      {
-         MessageInterface::ShowMessage("WARNING The covariance is no longer positive definite! Epoch = %s\n", currentEpochGT.ToString().c_str());
-         break;
-      }
-   }
-
-   pBar = sqrtP * sqrtP.Transpose();
-
-   // make it symmetric!
    Symmetrize(pBar);
 
-#ifdef DEBUG_ESTIMATION_COVARIACE_PROP
-   MessageInterface::ShowMessage("pBar = \n");
-   for (UnsignedInt i = 0; i < stateSize; ++i)
+   // 5. Restore the command-reference MEAN onto the objects (PropagateSigmaPoints
+   //    perturbs and restores them, but stamps a stale epoch because
+   //    GetEstimationState carries no epoch).  Writing cmdMean with currentEpochGT
+   //    guarantees a clean mean + epoch for the measurement update and for the
+   //    command's next propagation.  The covariance (pBar) is centred on xbar.
+   GmatState predState = cmdMean;
+   predState.SetEpochGT(currentEpochGT);
+   esm.SetEstimationState(predState);
+   esm.MapVectorToObjects();
+
+   RefactorCovariance(pBar);
+
+   // The predicted distribution becomes the prior for the next step (the
+   // measurement update, if any, will overwrite this with the corrected state).
+   ukfPriorState   = cmdMean;
+   ukfPriorEpochGT = currentEpochGT;
+
+#ifdef DEBUG_UKF
    {
-      for (UnsignedInt j = 0; j < stateSize; ++j)
-      {
-         MessageInterface::ShowMessage("  %.12le", pBar(i, j));
-      }
-      MessageInterface::ShowMessage("\n");
+      Real dPos = 0.0, dVel = 0.0;
+      for (UnsignedInt i = 0; i < 3 && i < n; ++i)
+         dPos = GmatMathUtil::Max(dPos, GmatMathUtil::Abs(xbar(i) - cmdMean[i]));
+      for (UnsignedInt i = 3; i < 6 && i < n; ++i)
+         dVel = GmatMathUtil::Max(dVel, GmatMathUtil::Abs(xbar(i) - cmdMean[i]));
+      MessageInterface::ShowMessage("[UKF mean] dt=%.1f |xbar - cmdMean| pos=%.3e "
+         "vel=%.3e | pBar pos=%.3e vel=%.3e\n", dt, dPos, dVel,
+         pBar(0,0), pBar(3,3));
    }
 #endif
 }
@@ -904,61 +810,108 @@ void UnscentedKalmanFilter::ComputeObs(UpdateInfoType &updateStat)
 //------------------------------------------------------------------------------
 void UnscentedKalmanFilter::ComputeGain(UpdateInfoType &updateStat)
 {
-   if (updateStat.measStat.isCalculated)
+   if (!updateStat.measStat.isCalculated)
+      return;
+
+   #ifdef DEBUG_ESTIMATION
+      MessageInterface::ShowMessage("Computing unscented Kalman gain\n");
+   #endif
+
+   Rmatrix R = *(GetMeasurementCovariance()->GetCovariance());
+   const Integer m = R.GetNumRows();
+   const UnsignedInt n = stateSize;
+
+   // Measurement underweighting (Lear's method): inflate the predicted
+   // measurement covariance contribution by (1 + deweightCoeff).
+   Real scale = 1.0;
+   Real posCovTraceSqrt = GmatMathUtil::Sqrt(pBar(0, 0) + pBar(1, 1) + pBar(2, 2));
+   if (posCovTraceSqrt > deweightThreshold && deweightCoeff > 0)
    {
-      #ifdef DEBUG_ESTIMATION
-         MessageInterface::ShowMessage("Computing Kalman Gain\n");
-      #endif
+      scale = 1.0 + deweightCoeff;
 
-      // Set up measurement underweighting (Lear's method)
-      Real sqrtScale = 1.0;
-      Real posCovTraceSqrt = GmatMathUtil::Sqrt(pBar(0, 0) + pBar(1, 1) + pBar(2, 2));
-      if (posCovTraceSqrt > deweightThreshold && deweightCoeff > 0)
-      {
-         sqrtScale = GmatMathUtil::Sqrt(1.0 + deweightCoeff);
+      bool handleLeapSecond;
+      GmatTime utcMjdEpoch = theTimeConverter->Convert(updateStat.measStat.epoch, TimeSystemConverter::A1MJD, TimeSystemConverter::UTCMJD,
+         GmatTimeConstants::JD_JAN_5_1941, &handleLeapSecond);
+      std::string utcEpoch = theTimeConverter->ConvertMjdToGregorian(utcMjdEpoch.GetMjd(), handleLeapSecond);
 
-         bool handleLeapSecond;
-         GmatTime utcMjdEpoch = theTimeConverter->Convert(updateStat.measStat.epoch, TimeSystemConverter::A1MJD, TimeSystemConverter::UTCMJD,
-            GmatTimeConstants::JD_JAN_5_1941, &handleLeapSecond);
-         std::string utcEpoch = theTimeConverter->ConvertMjdToGregorian(utcMjdEpoch.GetMjd(), handleLeapSecond);
-
-         MessageInterface::ShowMessage("Measurement %d of type %s at %s UTCG was underweighted. (1 sigma pos uncertainty was %g km)\n",
-            updateStat.measStat.recNum, updateStat.measStat.type.c_str(), utcEpoch.c_str(), posCovTraceSqrt);
-      }
-
-      // Perform thinQR decomposition to calculate K and P
-      Rmatrix R = *(GetMeasurementCovariance()->GetCovariance());
-      Integer measSize = R.GetNumRows();
-
-      Rmatrix sqrtR_T(measSize, measSize);
-      cf.Factor(R, sqrtR_T);
-
-      Rmatrix Spbar = sqrtP;
-      Rmatrix Sr = sqrtR_T.Transpose();
-      Rmatrix Sw = thinQR(sqrtScale*H*Spbar, Sr);
-
-      #ifdef DEBUG_ESTIMATION
-         MessageInterface::ShowMessage("Sw = \n");
-         for (UnsignedInt i = 0; i < Sw.GetNumRows(); ++i)
-         {
-           for (UnsignedInt j = 0; j < Sw.GetNumColumns(); ++j)
-           {
-             MessageInterface::ShowMessage("  %.12le", Sw(i,j));
-           }
-           MessageInterface::ShowMessage("\n");
-         }
-      #endif
-
-      #ifdef DEBUG_ESTIMATION
-         MessageInterface::ShowMessage("Calculating the Kalman gain\n");
-      #endif
-
-      kalman = Spbar * Spbar.Transpose() * H.Transpose() * (Sw*Sw.Transpose()).Inverse();
-      sqrtPupdate = thinQR((I - kalman * H) * Spbar, kalman*Sr);
-
-      updateStat.measStat.kalmanGain.SetSize(kalman.GetNumRows(), kalman.GetNumColumns());
-      updateStat.measStat.kalmanGain = kalman;
+      MessageInterface::ShowMessage("Measurement %d of type %s at %s UTCG was underweighted. (1 sigma pos uncertainty was %g km)\n",
+         updateStat.measStat.recNum, updateStat.measStat.type.c_str(), utcEpoch.c_str(), posCovTraceSqrt);
    }
+
+   // Predicted mean state (written onto the objects by the time update) and the
+   // sigma points about it using the predicted sqrtP.
+   GmatState meanState = esm.GetEstimationState();
+   Rvector xbar(n);
+   for (UnsignedInt i = 0; i < n; ++i)
+      xbar(i) = meanState[i];
+
+   std::vector<Rvector> Xi;
+   GenerateSigmaPoints(xbar, sqrtP, Xi);
+
+   // Baseline measurement (mean) to fall back on if a perturbed sigma point
+   // makes the measurement infeasible.
+   const MeasurementData *mBase = measManager.GetMeasurement(modelsToAccess[0]);
+   Rvector yBase(m);
+   for (Integer k = 0; k < m; ++k)
+      yBase(k) = (mBase && (UnsignedInt)k < mBase->value.size()) ? mBase->value[k] : 0.0;
+
+   // Evaluate the measurement at each sigma point: Yi = h(Xi)
+   std::vector<Rvector> Yi(Xi.size(), Rvector(m));
+   for (UnsignedInt s = 0; s < Xi.size(); ++s)
+   {
+      GmatState st = meanState;
+      for (UnsignedInt i = 0; i < n; ++i)
+         st[i] = Xi[s](i);
+      esm.SetEstimationState(st);
+      esm.MapVectorToObjects();
+      measManager.CalculateMeasurements();
+      const MeasurementData *md = measManager.GetMeasurement(modelsToAccess[0]);
+
+      Rvector y(m);
+      bool ok = (md != NULL && md->isFeasible && (Integer)md->value.size() == m);
+      for (Integer k = 0; k < m; ++k)
+         y(k) = ok ? md->value[k] : yBase(k);
+      Yi[s] = y;
+   }
+
+   // Restore the predicted mean onto the objects and recompute its measurement
+   esm.SetEstimationState(meanState);
+   esm.MapVectorToObjects();
+   measManager.CalculateMeasurements();
+
+   // Predicted measurement mean
+   Rvector ybar(m);
+   for (Integer k = 0; k < m; ++k)
+      ybar(k) = 0.0;
+   for (UnsignedInt s = 0; s < Yi.size(); ++s)
+      for (Integer k = 0; k < m; ++k)
+         ybar(k) += wm[s] * Yi[s](k);
+
+   // Innovation covariance Pyy = scale * sum wc (Yi-ybar)(Yi-ybar)' + R
+   // and cross covariance Pxy = sum wc (Xi-xbar)(Yi-ybar)'
+   Rmatrix Pyy(m, m);
+   Rmatrix Pxy(n, m);
+   for (UnsignedInt s = 0; s < Yi.size(); ++s)
+   {
+      Rvector dy = Yi[s] - ybar;
+      Rvector dx = Xi[s] - xbar;
+      for (Integer k = 0; k < m; ++k)
+      {
+         for (Integer l = 0; l < m; ++l)
+            Pyy(k, l) += scale * wc[s] * dy(k) * dy(l);
+         for (UnsignedInt i = 0; i < n; ++i)
+            Pxy(i, k) += wc[s] * dx(i) * dy(k);
+      }
+   }
+   for (Integer k = 0; k < m; ++k)
+      for (Integer l = 0; l < m; ++l)
+         Pyy(k, l) += R(k, l);
+
+   kalman = Pxy * Pyy.Inverse();
+   ukfPyy = Pyy;
+
+   updateStat.measStat.kalmanGain.SetSize(kalman.GetNumRows(), kalman.GetNumColumns());
+   updateStat.measStat.kalmanGain = kalman;
 }
 
 
@@ -1005,6 +958,10 @@ void UnscentedKalmanFilter::UpdateElements(UpdateInfoType &updateStat)
          esm.SetEstimationState(estimationStateS);                       // update the value of estimation state
          esm.MapVectorToObjects();
          esm.MapCovariancesToObjects();
+
+         // The corrected estimate becomes the prior for the next predict
+         ukfPriorState   = esm.GetEstimationState();
+         ukfPriorEpochGT = currentEpochGT;
       }
 
       #ifdef DEBUG_ESTIMATION
@@ -1014,22 +971,12 @@ void UnscentedKalmanFilter::UpdateElements(UpdateInfoType &updateStat)
          MessageInterface::ShowMessage("\n");
       #endif
 
-      // Select the method used to update the covariance here:
-      // UpdateCovarianceSimple();
-      // UpdateCovarianceJoseph();
-
-      Rmatrix P2 = sqrtPupdate * sqrtPupdate.Transpose();
-      sqrtP = sqrtPupdate;
-
-      // Warn if covariance is not positive definite
-      for (UnsignedInt ii = 0U; ii < stateSize; ii++)
-      {
-         if (GmatMathUtil::Abs(sqrtP(ii, ii)) < 1e-16)
-         {
-            MessageInterface::ShowMessage("WARNING The covariance is no longer positive definite! Epoch = %s\n", currentEpochGT.ToString().c_str());
-            break;
-         }
-      }
+      // Unscented covariance update: P = pBar - K Pyy K'  (Joseph-equivalent for
+      // the unscented transform).  RefactorCovariance refreshes sqrtP = chol(P)
+      // and warns if P is not positive definite.
+      Rmatrix P2 = pBar - kalman * ukfPyy * kalman.Transpose();
+      Symmetrize(P2);
+      RefactorCovariance(P2);
 
       (*(stateCovariance->GetCovariance())) = P2;
    }
@@ -1624,7 +1571,7 @@ void UnscentedKalmanFilter::BuildSigmaPropagator()
 
    if (propagators.empty() || propagators[0] == NULL)
    {
-      MessageInterface::ShowMessage("[UKF Spike] BuildSigmaPropagator: no base "
+      MessageInterface::ShowMessage("[UKF] BuildSigmaPropagator: no base "
          "propagator to clone; sigma-point experiment will be skipped.\n");
       return;
    }
@@ -1634,7 +1581,7 @@ void UnscentedKalmanFilter::BuildSigmaPropagator()
    esm.GetStateObjects(stateObjs, Gmat::SPACEOBJECT);
    if (stateObjs.empty())
    {
-      MessageInterface::ShowMessage("[UKF Spike] BuildSigmaPropagator: esm has no "
+      MessageInterface::ShowMessage("[UKF] BuildSigmaPropagator: esm has no "
          "space objects; sigma-point experiment will be skipped.\n");
       return;
    }
@@ -1660,14 +1607,17 @@ void UnscentedKalmanFilter::BuildSigmaPropagator()
    try
    {
       sigmaProp->PrepareInternals();
-      MessageInterface::ShowMessage("[UKF Spike] BuildSigmaPropagator: initialized "
-         "sigma-point propagator '%s' over %d space object(s), state dim %d.\n",
+      ObjectArray psmObjs;
+      psm->GetStateObjects(psmObjs, Gmat::SPACEOBJECT);
+      MessageInterface::ShowMessage("[UKF] BuildSigmaPropagator: '%s' over %d "
+         "space object(s), state dim %d. esm sc=%p  sigmaProp psm sc=%p\n",
          sigmaProp->GetName().c_str(), (Integer)stateObjs.size(),
-         (Integer)psm->GetState()->GetSize());
+         (Integer)psm->GetState()->GetSize(), (void*)stateObjs[0],
+         (void*)(psmObjs.empty() ? NULL : psmObjs[0]));
    }
    catch (BaseException &ex)
    {
-      MessageInterface::ShowMessage("[UKF Spike] BuildSigmaPropagator: failed to "
+      MessageInterface::ShowMessage("[UKF] BuildSigmaPropagator: failed to "
          "initialize sigma-point propagator: %s\n", ex.GetFullMessage().c_str());
       delete sigmaProp;
       sigmaProp = NULL;
@@ -1676,129 +1626,124 @@ void UnscentedKalmanFilter::BuildSigmaPropagator()
 
 
 //------------------------------------------------------------------------------
-// void PropagateSigmaPoints(Real dt)
+// void PropagateSigmaPoints(seeds, startEpoch, dt, propPts)
 //------------------------------------------------------------------------------
 /**
- * SPIKE 1 EXPERIMENT
+ * Re-seeds and propagates each sigma point from startEpoch forward by dt through
+ * the dedicated sigmaProp, returning the propagated estimation states.
  *
- * Proves that GMAT's propagation subsystem can re-seed an arbitrary state and
- * re-propagate it from inside the estimator, which is the core capability a true
- * UKF time update requires.  The method:
- *
- *   1. Saves the current reference estimation state (so the live filter is left
- *      unperturbed on exit).
- *   2. Generates the 2n+1 sigma points about that reference using sqrtP.
- *   3. For each sigma point: writes it into the estimation state, maps it onto
- *      the propagated objects, re-seeds the ODE model from those objects, steps
- *      the propagator by dt, then reads the propagated state back.
- *   4. Recombines the propagated points (weighted mean) and logs it against the
- *      reference-trajectory propagation for comparison.
- *   5. Restores the saved reference state and re-seeds the ODE model.
- *
- * Known items to resolve during the build/run loop (the reason this is a spike,
- * not the finished time update):
- *   - Coordinate frame of the estimation state (Cartesian solve-for vs Keplerian
- *     vs epsilon-scaled) must be consistent for propagation; this draft seeds in
- *     the native estimation state and will be refined once the round-trip is
- *     confirmed.
- *   - The propagator state vector carries the STM (variational equations); for
- *     the UKF these are unnecessary and should be disabled once validated.
- *   - State restoration must exactly recover the propagator so the live EKF math
- *     that follows is bit-for-bit unaffected.
+ * Per sigma point: write the seed into the estimation state, map it onto the
+ * objects, force the objects to startEpoch (SetEstimationState does not carry an
+ * epoch, and MapVectorToObjects would otherwise stamp the current esm epoch),
+ * re-seed the integrator from the objects, Step(dt), read the propagated state
+ * back.  The estimation objects are restored to their entry state on exit so the
+ * caller's bookkeeping is unperturbed.
  */
 //------------------------------------------------------------------------------
-void UnscentedKalmanFilter::PropagateSigmaPoints(Real dt)
+void UnscentedKalmanFilter::PropagateSigmaPoints(const std::vector<Rvector> &seeds,
+   const GmatTime &startEpoch, Real dt, std::vector<Rvector> &propPts)
 {
-   // Use the dedicated, fully-initialized sigma-point propagator.  The base
-   // Estimator's propagators[] are configured but never Initialize()d for
-   // standalone stepping (only RunEstimator's private clones are), so stepping
-   // them directly would integrate an unbuilt state vector and crash.
+   propPts.clear();
    if (sigmaProp == NULL)
-   {
-      MessageInterface::ShowMessage("[UKF Spike] No initialized sigma-point "
-         "propagator available; skipping sigma-point propagation experiment.\n");
       return;
-   }
 
-   PropSetup    *prop = sigmaProp;
-   ODEModel     *ode  = prop->GetODEModel();
-   Propagator   *p    = prop->GetPropagator();
-
+   ODEModel   *ode = sigmaProp->GetODEModel();
+   Propagator *p   = sigmaProp->GetPropagator();
    if (ode == NULL || p == NULL)
-   {
-      MessageInterface::ShowMessage("[UKF Spike] Propagator has no ODE model "
-         "(ephemeris propagator?); skipping sigma-point experiment.\n");
       return;
-   }
 
    const UnsignedInt n = stateSize;
 
-   // 1. Save the reference estimation state so we can restore it afterwards
-   GmatState refState = esm.GetEstimationState();
-   Rvector   refMean(n);
-   for (UnsignedInt i = 0; i < n; ++i)
-      refMean(i) = refState[i];
+   ObjectArray scObjs;
+   esm.GetStateObjects(scObjs, Gmat::SPACEOBJECT);
 
-   // 2. Generate sigma points about the reference using the current sqrtP
-   std::vector<Rvector> sigmaPts;
-   GenerateSigmaPoints(refMean, sqrtP, sigmaPts);
+   // Save the entry estimation state + epoch to restore on exit
+   GmatState saved      = esm.GetEstimationState();
+   GmatTime  savedEpoch = saved.GetEpochGT();
 
-   MessageInterface::ShowMessage(
-      "\n[UKF Spike] PropagateSigmaPoints: dt=%.6f s, n=%d, %d sigma points\n",
-      dt, n, (Integer)sigmaPts.size());
+   GmatTime endEpoch = startEpoch;
+   endEpoch.AddSeconds(dt);
 
-   const GmatEpoch startEpoch = refState.GetEpoch();
-   const GmatEpoch newEpoch   = startEpoch + dt / GmatTimeConstants::SECS_PER_DAY;
+   PropagationStateManager *psm = sigmaProp->GetPropStateManager();
+   const Integer orbitSize = (n >= 6) ? 6 : (Integer)n;  // first 6 = orbit Cartesian
 
-   // 3. Propagate each sigma point, re-seeding from the saved reference each time
-   std::vector<Rvector> propPts;
-   propPts.reserve(sigmaPts.size());
-
-   for (UnsignedInt s = 0; s < sigmaPts.size(); ++s)
+   propPts.reserve(seeds.size());
+   for (UnsignedInt s = 0; s < seeds.size(); ++s)
    {
-      // Seed the estimation state with this sigma point
-      GmatState seed = refState;
+      GmatState seed = saved;
       for (UnsignedInt i = 0; i < n; ++i)
-         seed[i] = sigmaPts[s](i);
+         seed[i] = seeds[s](i);
 
+      // Write the sigma point onto the (shared) objects and stamp the prior epoch
       esm.SetEstimationState(seed);
       esm.MapVectorToObjects();
+      for (UnsignedInt k = 0; k < scObjs.size(); ++k)
+         ((SpaceObject*)scObjs[k])->SetEpochGT(startEpoch);
 
-      // Re-seed the integrator from the freshly-set objects and step by dt
+      // Re-seed the integrator and reset its clock so each sigma point integrates
+      // over the same [startEpoch, startEpoch+dt] interval with correct force epochs.
       ode->UpdateFromSpaceObject();
+      ode->SetTime(0.0);
+      p->SetTime(0.0);
       p->Step(dt);
-      ode->UpdateSpaceObject(newEpoch);
+      ode->UpdateSpaceObject(endEpoch.GetMjd());
 
-      // Read the propagated estimation state back out
-      GmatState afterState = esm.GetEstimationState();
-      Rvector   after(n);
-      for (UnsignedInt i = 0; i < n; ++i)
-         after(i) = afterState[i];
-      propPts.push_back(after);
+      // Read the propagated state directly from the propagator's own state vector
+      // (the esm round-trip mis-reads when the seed epoch differs from the live
+      // estimation epoch).  The first orbitSize elements are the MJ2000Eq Cartesian
+      // state, matching the estimation state's orbit elements; non-orbit elements
+      // (e.g. Cd) are not in the sigma-point prop vector and carry the seed value.
+      GmatState *propState = psm->GetState();
+      Rvector v(n);
+      for (Integer i = 0; i < orbitSize; ++i)
+         v(i) = (*propState)[i];
+      for (UnsignedInt i = orbitSize; i < n; ++i)
+         v(i) = seeds[s](i);
+      propPts.push_back(v);
    }
 
-   // 4. Recombine: weighted mean of the propagated sigma points
-   Rvector ukfMean(n);
-   for (UnsignedInt i = 0; i < n; ++i)
-      ukfMean(i) = 0.0;
-   for (UnsignedInt s = 0; s < propPts.size(); ++s)
-      for (UnsignedInt i = 0; i < n; ++i)
-         ukfMean(i) += wm[s] * propPts[s](i);
-
-   MessageInterface::ShowMessage("[UKF Spike] Recombined sigma-point mean (UT):\n   ");
-   for (UnsignedInt i = 0; i < n; ++i)
-      MessageInterface::ShowMessage(" % .9e", ukfMean(i));
-   MessageInterface::ShowMessage("\n[UKF Spike] Central point propagated (X_0):\n   ");
-   for (UnsignedInt i = 0; i < n; ++i)
-      MessageInterface::ShowMessage(" % .9e", propPts[0](i));
-   MessageInterface::ShowMessage("\n[UKF Spike] UT-mean minus central (nonlinearity signature):\n   ");
-   for (UnsignedInt i = 0; i < n; ++i)
-      MessageInterface::ShowMessage(" % .3e", ukfMean(i) - propPts[0](i));
-   MessageInterface::ShowMessage("\n");
-
-   // 5. Restore the reference state so the live EKF update is unperturbed
-   esm.SetEstimationState(refState);
+   // Restore the entry estimation state + epoch
+   esm.SetEstimationState(saved);
    esm.MapVectorToObjects();
+   for (UnsignedInt k = 0; k < scObjs.size(); ++k)
+      ((SpaceObject*)scObjs[k])->SetEpochGT(savedEpoch);
    ode->UpdateFromSpaceObject();
-   ode->UpdateSpaceObject(startEpoch);
+}
+
+
+//------------------------------------------------------------------------------
+// void RefactorCovariance(const Rmatrix &P)
+//------------------------------------------------------------------------------
+/**
+ * Sets sqrtP to the lower-triangular Cholesky factor of P (P = sqrtP sqrtP'),
+ * using the inherited CholeskyFactorization, and warns if P is not positive
+ * definite.  (v1 of the UKF carries the full covariance and re-factors here; the
+ * square-root cholupdate form is a follow-on.)
+ */
+//------------------------------------------------------------------------------
+void UnscentedKalmanFilter::RefactorCovariance(const Rmatrix &P)
+{
+   Rmatrix L(stateSize, stateSize);
+   try
+   {
+      cf.Factor(P, L);
+   }
+   catch (UtilityException &)
+   {
+      MessageInterface::ShowMessage("WARNING UnscentedKalmanFilter: predicted "
+         "covariance is not positive definite at epoch %s\n",
+         currentEpochGT.ToString().c_str());
+      return;
+   }
+   sqrtP = L.Transpose();
+
+   for (UnsignedInt ii = 0U; ii < stateSize; ii++)
+   {
+      if (GmatMathUtil::Abs(sqrtP(ii, ii)) < 1e-16)
+      {
+         MessageInterface::ShowMessage("WARNING The covariance is no longer "
+            "positive definite! Epoch = %s\n", currentEpochGT.ToString().c_str());
+         break;
+      }
+   }
 }
