@@ -427,6 +427,26 @@ if (GMAT_INCLUDE_CSALT)
 endif()
 
 # ====================================================================
+# IPOPT — Interior Point OPTimizer (used by IPOPTOptimizerPlugin)
+OPTION(GMAT_USE_IPOPT "Build the IPOPT optimizer plugin" OFF)
+if(GMAT_USE_IPOPT)
+   SET(IPOPT_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/depends/ipopt"
+       CACHE PATH "IPOPT Root Directory")
+   SET(IPOPT_LIB_DIR     "${IPOPT_ROOT_DIR}/lib"            CACHE PATH "IPOPT Library Directory")
+   SET(IPOPT_INCLUDE_DIR "${IPOPT_ROOT_DIR}/include/coin-or" CACHE PATH "IPOPT Include Directory")
+   FIND_LIBRARY(IPOPT_LIBRARY ipopt PATHS ${IPOPT_LIB_DIR} NO_DEFAULT_PATH)
+   if(NOT IPOPT_LIBRARY)
+      MESSAGE(WARNING "IPOPT library not found at ${IPOPT_LIB_DIR}. "
+                      "Set IPOPT_ROOT_DIR to a valid IPOPT installation or "
+                      "disable GMAT_USE_IPOPT.")
+      SET(GMAT_USE_IPOPT OFF CACHE BOOL "Build the IPOPT optimizer plugin" FORCE)
+   else()
+      MESSAGE(STATUS "Found IPOPT: ${IPOPT_ROOT_DIR}")
+      find_package(Threads REQUIRED)
+   endif()
+endif()
+
+# ====================================================================
 # Common build options
 
 if(WIN32)

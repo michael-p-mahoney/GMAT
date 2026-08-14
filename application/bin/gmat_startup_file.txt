@@ -59,6 +59,7 @@ PLUGIN                  = ../plugins/libFminconOptimizer
 PLUGIN                  = ../plugins/libProductionPropagators
 PLUGIN                  = ../plugins/libGmatEstimation
 PLUGIN                  = ../plugins/libYukonOptimizer
+PLUGIN                  = ../plugins/libIPOPTOptimizer
 PLUGIN                  = ../plugins/libScriptTools
 PLUGIN                  = ../plugins/libThrustFile
 PLUGIN                  = ../plugins/libEKF

@@ -1,0 +1,181 @@
+%
+%  Ex_OptFiniteBurn_IPOPT
+%
+%  Use the IPOPT optimizer to find a minimum duration set of burns to raise and
+%  circularize an orbit.
+%
+%  Based on Ex_OptFiniteBurn.script (SNOPT version).
+%
+%  Expected solution: SMA ~= 7100 km, ECC ~= 0 (circularized orbit)
+%
+
+
+%----------------------------------------
+%---------- Spacecraft
+%----------------------------------------
+
+Create Spacecraft DefaultSC;
+
+DefaultSC.DateFormat                   = TAIModJulian;
+DefaultSC.Epoch                        = '21545';
+DefaultSC.CoordinateSystem             = EarthMJ2000Eq;
+DefaultSC.DisplayStateType             = Cartesian;
+DefaultSC.X                            = 6900;
+DefaultSC.Y                            = 0;
+DefaultSC.Z                            = 0;
+DefaultSC.VX                           = 0;
+DefaultSC.VY                           = 7.60053813407552;
+DefaultSC.VZ                           = 0;
+DefaultSC.DryMass                      = 850;
+DefaultSC.Cd                           = 2.2;
+DefaultSC.Cr                           = 1.8;
+DefaultSC.DragArea                     = 15;
+DefaultSC.SRPArea                      = 1;
+DefaultSC.Tanks                        = {FuelTank1};
+DefaultSC.Thrusters                    = {Thruster1};
+
+%----------------------------------------
+%---------- Hardware Components
+%----------------------------------------
+
+Create ChemicalTank FuelTank1;
+
+FuelTank1.AllowNegativeFuelMass = false;
+FuelTank1.FuelMass              = 400;
+FuelTank1.Pressure              = 1500;
+FuelTank1.Temperature           = 20;
+FuelTank1.RefTemperature        = 20;
+FuelTank1.Volume                = 0.75;
+FuelTank1.FuelDensity           = 1260;
+FuelTank1.PressureModel         = PressureRegulated;
+
+Create ChemicalThruster Thruster1;
+
+Thruster1.CoordinateSystem   = Local;
+Thruster1.Origin             = Earth;
+Thruster1.Axes               = VNB;
+Thruster1.ThrustDirection1   = 0.577350269189626;
+Thruster1.ThrustDirection2   = 0.577350269189626;
+Thruster1.ThrustDirection3   = 0.577350269189626;
+Thruster1.DutyCycle          = 1;
+Thruster1.ThrustScaleFactor  = 1;
+Thruster1.DecrementMass      = true;
+Thruster1.Tank               = {FuelTank1};
+Thruster1.GravitationalAccel = 9.810000000000001;
+Thruster1.C1                 = 1000;
+Thruster1.K1                 = 300;
+Thruster1.MixRatio           = [ 1 ];
+
+%----------------------------------------
+%---------- ForceModels
+%----------------------------------------
+
+Create ForceModel DefaultProp_ForceModel;
+
+DefaultProp_ForceModel.CentralBody            = Earth;
+DefaultProp_ForceModel.PointMasses            = {Earth};
+DefaultProp_ForceModel.Drag                   = None;
+DefaultProp_ForceModel.SRP                    = Off;
+DefaultProp_ForceModel.RelativisticCorrection = Off;
+DefaultProp_ForceModel.ErrorControl           = RSSStep;
+
+%----------------------------------------
+%---------- Propagators
+%----------------------------------------
+
+Create Propagator DefaultProp;
+
+DefaultProp.FM                       = DefaultProp_ForceModel;
+DefaultProp.Type                     = RungeKutta89;
+DefaultProp.InitialStepSize          = 60;
+DefaultProp.Accuracy                 = 9.999999999999999e-012;
+DefaultProp.MinStep                  = 0.001;
+DefaultProp.MaxStep                  = 2700;
+DefaultProp.MaxStepAttempts          = 50;
+DefaultProp.StopIfAccuracyIsViolated = true;
+
+%----------------------------------------
+%---------- Burns
+%----------------------------------------
+
+Create FiniteBurn FiniteBurn1;
+FiniteBurn1.Thrusters = {Thruster1};
+
+%----------------------------------------
+%---------- Solvers
+%----------------------------------------
+
+Create IPOPT NLP;
+
+NLP.ShowProgress          = true;
+NLP.ReportStyle           = Normal;
+NLP.ReportFile            = 'Ex_OptFiniteBurn_IPOPT.report';
+NLP.OptimalityTolerance   = 1e-4;
+NLP.FeasibilityTolerance  = 1e-4;
+NLP.MaximumIterations     = 300;
+NLP.PrintLevel            = 5;
+
+%----------------------------------------
+%---------- Arrays, Variables, Strings
+%----------------------------------------
+
+Create Variable burn1Duration burn2Duration propDuration costFunction smaError;
+
+burn1Duration = 300;
+burn2Duration = 300;
+
+Create ReportFile solData;
+
+solData.WriteHeaders = false;
+solData.Filename     = Ex_OptFiniteBurn_IPOPT.report;
+
+%----------------------------------------
+%---------- Mission Sequence
+%----------------------------------------
+BeginMissionSequence;
+
+Optimize NLP {SolveMode = Solve, ExitMode = DiscardAndContinue};
+
+   %  Define the variables
+   Vary NLP(burn1Duration = 230, {Perturbation = .01, Lower = 1, Upper = 10000, MultiplicativeScaleFactor = .1});
+   Vary NLP(burn2Duration = 221, {Perturbation = .01, Lower = 1, Upper = 10000, AdditiveScaleFactor = 0.0, MultiplicativeScaleFactor = .1});
+   Vary NLP(propDuration  = 2706, {Perturbation = .01, Lower = 100, Upper = 10000, AdditiveScaleFactor = 0.0, MultiplicativeScaleFactor = .01});
+
+   %  Perform the first maneuver
+   BeginFiniteBurn FiniteBurn1(DefaultSC);
+   If burn1Duration > 0
+      Propagate DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = burn1Duration};
+   Else
+      Propagate BackProp DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = burn1Duration};
+   EndIf;
+   EndFiniteBurn FiniteBurn1(DefaultSC);
+
+   %  Propagate through the coast phase
+   If propDuration > 0
+      Propagate DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = propDuration};
+   Else
+      Propagate BackProp DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = propDuration};
+   EndIf;
+
+   %  Perform the second maneuver
+   BeginFiniteBurn FiniteBurn1(DefaultSC);
+   If burn2Duration > 0
+      Propagate DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = burn2Duration};
+   Else
+      Propagate BackProp DefaultProp(DefaultSC) {DefaultSC.ElapsedSecs = burn2Duration};
+   EndIf;
+   EndFiniteBurn FiniteBurn1(DefaultSC);
+
+   %  Constraints and cost
+   smaError = (DefaultSC.SMA - 7100)/10000;
+   NonlinearConstraint NLP(smaError = 0);
+   NonlinearConstraint NLP(DefaultSC.ECC = 0.0);
+   costFunction = -DefaultSC.TotalMass/1000;
+   Minimize NLP(costFunction);
+
+EndOptimize;
+
+Report solData smaError DefaultSC.ECC costFunction;
+
+Write burn1Duration burn2Duration propDuration;
+Write smaError DefaultSC.ECC costFunction;
