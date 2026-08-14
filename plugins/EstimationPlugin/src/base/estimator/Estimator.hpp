@@ -632,6 +632,7 @@ protected:
    mutable bool                   matDeprecatedFlag;
 
    virtual bool           WriteJsonData();
+   virtual void           WriteJsonContent(std::ofstream &outFile);
    virtual void           AddJsonObservationData(const MeasurementInfoType &measStat);
    virtual void           AddJsonIterationData();
    virtual void           AddJsonIterationData(const MeasurementInfoType &measStat);

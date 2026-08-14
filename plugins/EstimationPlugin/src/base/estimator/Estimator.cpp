@@ -11171,6 +11171,26 @@ bool Estimator::WriteJsonData()
       // FinalWRMS
    }
 
+   WriteJsonContent(outFile);
+
+   outFile << "}";
+   outFile.close();
+
+   MessageInterface::ShowMessage("Finished Writing Estimator JSON File.\n\n");
+
+   return true;
+}
+
+//------------------------------------------------------------------------------------------
+// void Estimator::WriteJsonContent(std::ofstream &outFile)
+//------------------------------------------------------------------------------------------
+/**
+* This function writes the estimator-specific content section of the JSON file.
+* Derived classes override this to write their own content (e.g., FilterUpdates).
+*/
+//------------------------------------------------------------------------------------------
+void Estimator::WriteJsonContent(std::ofstream &outFile)
+{
    //Observations
    outFile << "\n    \"Observations\" : [\n";
    for (Integer i = 0; i < jsonObsData.size(); ++i)
@@ -11190,14 +11210,6 @@ bool Estimator::WriteJsonData()
       outFile << jsonIterData[i];
    }
    outFile << "]\n\n";
-
-
-   outFile << "}";
-   outFile.close();
-
-   MessageInterface::ShowMessage("Finished Writing Estimator JSON File.\n\n");
-
-   return true;
 }
 
 //------------------------------------------------------------------------------------------
